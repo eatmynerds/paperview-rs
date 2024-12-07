@@ -1,8 +1,26 @@
 extern crate imlib_rs;
 
 use clap::Parser;
+use core::mem::{align_of, size_of};
 use std::{fs, path::Path};
 use x11::xlib::{Pixmap, Window};
+
+/// Struct for safe casts, from bytemuck
+struct Cast<A, B>((A, B));
+impl<A, B> Cast<A, B> {
+    const ASSERT_ALIGN_GREATER_THAN_EQUAL: () = assert!(align_of::<A>() >= align_of::<B>());
+    const ASSERT_SIZE_EQUAL: () = assert!(size_of::<A>() == size_of::<B>());
+    const ASSERT_SIZE_MULTIPLE_OF_OR_INPUT_ZST: () = assert!(
+        (size_of::<A>() == 0) || (size_of::<B>() != 0 && size_of::<A>() % size_of::<B>() == 0)
+    );
+}
+
+fn safe_ptr_cast<A, B>(a: *mut A) -> *mut B {
+    let _ = Cast::<A, B>::ASSERT_SIZE_EQUAL;
+    let _ = Cast::<A, B>::ASSERT_ALIGN_GREATER_THAN_EQUAL;
+
+    a.cast()
+}
 
 #[derive(Debug)]
 struct Monitor {
@@ -42,7 +60,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let width = x11::xlib::XDisplayWidth(display, current_screen);
             let height = x11::xlib::XDisplayHeight(display, current_screen);
             let depth = x11::xlib::XDefaultDepth(display, current_screen);
-            let visual = x11::xlib::XDefaultVisual(display, current_screen);
+            let mut visual = x11::xlib::XDefaultVisual(display, current_screen);
+            if visual as usize == 0x8 {
+                // TODO: Total insanity because for some reason for my second monitor it just
+                // returns 0x8 and segfaults on imlib_context_set_visual
+                continue
+            }
+
             let cm = x11::xlib::XDefaultColormap(display, current_screen);
             let root = x11::xlib::XRootWindow(display, current_screen);
             let pixmap =
@@ -57,8 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             imlib_rs::imlib_context_push(monitors[current_screen as usize].render_context);
-            imlib_rs::imlib_context_set_display(display as *mut imlib_rs::_XDisplay);
-            imlib_rs::imlib_context_set_visual(visual.cast());
+            imlib_rs::imlib_context_set_display(display.cast());
+            imlib_rs::imlib_context_set_visual(safe_ptr_cast(visual));
         }
 
         println!("{:#?}", monitors);
