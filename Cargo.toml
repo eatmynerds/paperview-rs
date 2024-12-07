@@ -1,0 +1,9 @@
+[package]
+name = "paperview-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.23", features = ["derive"] }
+imlib-rs = { version = "0.1.0", path = "./imlib-rs" }
+x11 = { version = "2.21.0", features = ["xlib"] }
