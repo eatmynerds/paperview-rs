@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if visual as usize == 0x8 {
                 // TODO: Total insanity because for some reason for my second monitor it just
                 // returns 0x8 and segfaults on imlib_context_set_visual
-                continue
+                continue;
             }
 
             let cm = x11::xlib::XDefaultColormap(display, current_screen);
@@ -83,6 +83,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             imlib_rs::imlib_context_push(monitors[current_screen as usize].render_context);
             imlib_rs::imlib_context_set_display(display.cast());
             imlib_rs::imlib_context_set_visual(safe_ptr_cast(visual));
+            imlib_rs::imlib_context_set_colormap(cm);
+            imlib_rs::imlib_context_set_drawable(pixmap);
+            imlib_rs::imlib_context_set_color_range(imlib_rs::imlib_create_color_range());
+            imlib_rs::imlib_context_pop();
         }
 
         println!("{:#?}", monitors);
