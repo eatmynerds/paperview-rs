@@ -3,7 +3,7 @@ extern crate imlib_rs;
 use clap::Parser;
 use core::mem::{align_of, size_of};
 use env_logger::Env;
-use log::debug;
+use log::{debug, info};
 use std::{
     ffi::{c_long, c_uchar, c_ulong, CString},
     fs,
@@ -48,60 +48,6 @@ fn safe_ptr_cast<A, B>(a: *mut A) -> *mut B {
     a.cast()
 }
 
-unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
-    let display = x11::xlib::XOpenDisplay(std::ptr::null());
-
-    let screen_count = x11::xlib::XScreenCount(display);
-
-    debug!("Found {} screens", screen_count);
-
-    let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
-
-    for current_screen in 0..=screen_count - 1 {
-        debug!("Running screen {}", current_screen);
-
-        let width = x11::xlib::XDisplayWidth(display, current_screen);
-        let height = x11::xlib::XDisplayHeight(display, current_screen);
-        let depth = x11::xlib::XDefaultDepth(display, current_screen);
-        let visual = x11::xlib::XDefaultVisual(display, current_screen);
-        if visual as usize == 0x8 {
-            // TODO: Total insanity because for some reason for my second monitor it just
-            // returns 0x8 and segfaults on imlib_context_set_visual
-            continue;
-        }
-
-        let cm = x11::xlib::XDefaultColormap(display, current_screen);
-        debug!(
-            "Screen {}: width: {}, height: {}, depth: {}",
-            current_screen, width, height, depth
-        );
-
-        let root = x11::xlib::XRootWindow(display, current_screen);
-        let pixmap =
-            x11::xlib::XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
-
-        monitors.push(Monitor {
-            root,
-            pixmap,
-            width: width as usize,
-            height: height as usize,
-            render_context: imlib_rs::imlib_context_new(),
-        });
-
-        imlib_rs::imlib_context_push(monitors[current_screen as usize].render_context);
-        imlib_rs::imlib_context_set_display(display.cast());
-        imlib_rs::imlib_context_set_visual(safe_ptr_cast(visual));
-        imlib_rs::imlib_context_set_colormap(cm);
-        imlib_rs::imlib_context_set_drawable(pixmap);
-        imlib_rs::imlib_context_set_color_range(imlib_rs::imlib_create_color_range());
-        imlib_rs::imlib_context_pop();
-    }
-
-    debug!("Loaded {} screens", screen_count);
-
-    (display, monitors)
-}
-
 unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     let mut r#type: x11::xlib::Atom = 0;
 
@@ -136,7 +82,7 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
             &mut data_root as *mut *mut c_uchar,
         );
 
-        if (r#type == x11::xlib::XA_PIXMAP) {
+        if r#type == x11::xlib::XA_PIXMAP {
             x11::xlib::XGetWindowProperty(
                 display,
                 monitor.root,
@@ -188,42 +134,89 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     );
 }
 
+unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
+    let display = x11::xlib::XOpenDisplay(std::ptr::null());
+
+    let screen_count = x11::xlib::XScreenCount(display);
+
+    info!("Found {} screens", screen_count);
+
+    let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
+
+    for current_screen in 0..=screen_count - 1 {
+        info!("Running screen {}", current_screen);
+
+        let width = x11::xlib::XDisplayWidth(display, current_screen);
+        let height = x11::xlib::XDisplayHeight(display, current_screen);
+        let depth = x11::xlib::XDefaultDepth(display, current_screen);
+        let visual = x11::xlib::XDefaultVisual(display, current_screen);
+        if visual as usize == 0x8 {
+            // TODO: Total insanity because for some reason for my second monitor it just
+            // returns 0x8 and segfaults on imlib_context_set_visual
+            continue;
+        }
+
+        let cm = x11::xlib::XDefaultColormap(display, current_screen);
+        info!(
+            "Screen {}: width: {}, height: {}, depth: {}",
+            current_screen, width, height, depth
+        );
+
+        let root = x11::xlib::XRootWindow(display, current_screen);
+        let pixmap =
+            x11::xlib::XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
+
+        monitors.push(Monitor {
+            root,
+            pixmap,
+            width: width as usize,
+            height: height as usize,
+            render_context: imlib_rs::imlib_context_new(),
+        });
+
+        imlib_rs::imlib_context_push(monitors[current_screen as usize].render_context);
+        imlib_rs::imlib_context_set_display(display.cast());
+        imlib_rs::imlib_context_set_visual(safe_ptr_cast(visual));
+        imlib_rs::imlib_context_set_colormap(cm);
+        imlib_rs::imlib_context_set_drawable(pixmap);
+        imlib_rs::imlib_context_set_color_range(imlib_rs::imlib_create_color_range());
+        imlib_rs::imlib_context_pop();
+    }
+
+    info!("Loaded {} screens", screen_count);
+
+    (display, monitors)
+}
+
 unsafe fn run(
     display: *mut x11::xlib::_XDisplay,
-    monitors: Vec<Monitor>,
-    current: imlib_rs::Imlib_Image,
+    monitors: &[Monitor],
+    current_image: imlib_rs::Imlib_Image,
 ) {
-    for (i, _) in monitors.iter().enumerate() {
-        let c_monitor: Monitor = monitors[i];
-
-        imlib_rs::imlib_context_push(c_monitor.render_context);
-        imlib_rs::imlib_context_set_dither(1);
-        imlib_rs::imlib_context_set_blend(1);
-        imlib_rs::imlib_context_set_image(current);
+    for monitor in monitors {
+        imlib_rs::imlib_context_push(monitor.render_context);
+        imlib_rs::imlib_context_set_image(current_image);
 
         let original_width = imlib_rs::imlib_image_get_width();
         let original_height = imlib_rs::imlib_image_get_height();
 
-        let scaled_image: imlib_rs::Imlib_Image = imlib_rs::imlib_create_cropped_scaled_image(
+        let scaled_image = imlib_rs::imlib_create_cropped_scaled_image(
             0,
             0,
             original_width,
             original_height,
-            c_monitor.width as i32,
-            c_monitor.height as i32,
+            monitor.width as i32,
+            monitor.height as i32,
         );
 
         imlib_rs::imlib_context_set_image(scaled_image);
-
         imlib_rs::imlib_render_image_on_drawable(0, 0);
 
-        set_root_atoms(display, c_monitor);
-        x11::xlib::XKillClient(display, x11::xlib::AllTemporary as u64);
-        x11::xlib::XSetCloseDownMode(display, x11::xlib::RetainTemporary);
-        x11::xlib::XSetWindowBackgroundPixmap(display, c_monitor.root, c_monitor.pixmap);
-        x11::xlib::XClearWindow(display, c_monitor.root);
+        set_root_atoms(display, *monitor);
+
+        x11::xlib::XSetWindowBackgroundPixmap(display, monitor.root, monitor.pixmap);
+        x11::xlib::XClearWindow(display, monitor.root);
         x11::xlib::XFlush(display);
-        x11::xlib::XSync(display, false as i32);
 
         imlib_rs::imlib_free_image_and_decache();
     }
@@ -234,7 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = CliImagePath::parse();
 
-    debug!("Loading images");
+    info!("Loading images");
 
     let image_dir = Path::new(&args.path);
 
@@ -254,14 +247,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    debug!("Loading monitors");
+    info!("Loading monitors");
 
     unsafe {
         let (display, monitors) = get_monitors();
 
-        debug!("Starting render loop");
+        debug!("{:#?}", monitors);
 
-        debug!("Starting the program...");
+        info!("Starting render loop");
+
+        info!("Starting the program...");
 
         let mut cycle = 0;
 
@@ -269,7 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cycle += 1;
             let current: imlib_rs::Imlib_Image = images[cycle % images_count];
 
-            run(display, monitors.clone(), current);
+            run(display, &monitors.clone(), current);
 
             let timeout = Duration::from_nanos(
                 (MICROSECONDS_PER_SECOND / TARGET_FPS) * 1_000, // nanoseconds
