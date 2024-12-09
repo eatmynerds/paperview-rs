@@ -3,13 +3,8 @@ extern crate imlib_rs;
 use clap::Parser;
 use core::mem::{align_of, size_of};
 use env_logger::Env;
-use log::{debug, info};
-use std::{
-    ffi::{c_long, c_uchar, c_ulong, CString},
-    fs,
-    path::Path,
-    time::Duration,
-};
+use log::info;
+use std::{ffi::CString, fs, path::Path, time::Duration};
 use x11::xlib::{Pixmap, Window};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
@@ -49,61 +44,10 @@ fn safe_ptr_cast<A, B>(a: *mut A) -> *mut B {
 }
 
 unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
-    let mut r#type: x11::xlib::Atom = 0;
-
-    let mut data_root: *mut c_uchar = c_uchar::from(1) as *mut c_uchar;
-    let data_eroot: *mut c_uchar = std::ptr::null_mut();
-    let mut format: i32 = 0;
-    let mut length: c_ulong = 0;
-    let mut after: c_ulong = 128;
-
-    let mut atom_root: x11::xlib::Atom =
-        x11::xlib::XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, true as i32);
-
-    let mut atom_eroot: x11::xlib::Atom = x11::xlib::XInternAtom(
-        display,
-        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
-        true as i32,
-    );
-
-    if atom_root != 0 && atom_eroot != 0 {
-        x11::xlib::XGetWindowProperty(
-            display,
-            monitor.root,
-            atom_root,
-            0 as c_long,
-            1 as c_long,
-            false as i32,
-            x11::xlib::AnyPropertyType as u64,
-            &mut r#type as *mut x11::xlib::Atom,
-            &mut format as *mut i32,
-            &mut length as *mut c_ulong,
-            &mut after as *mut c_ulong,
-            &mut data_root as *mut *mut c_uchar,
-        );
-
-        if r#type == x11::xlib::XA_PIXMAP {
-            x11::xlib::XGetWindowProperty(
-                display,
-                monitor.root,
-                atom_eroot,
-                0 as c_long,
-                1 as c_long,
-                false as i32,
-                x11::xlib::AnyPropertyType as u64,
-                &mut r#type as *mut x11::xlib::Atom,
-                &mut format as *mut i32,
-                &mut length as *mut c_ulong,
-                &mut after as *mut c_ulong,
-                &mut data_root as *mut *mut c_uchar,
-            );
-        }
-    }
-
-    atom_root =
+    let atom_root =
         x11::xlib::XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, false as i32);
 
-    atom_eroot = x11::xlib::XInternAtom(
+    let atom_eroot = x11::xlib::XInternAtom(
         display,
         c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
         false as i32,
@@ -251,8 +195,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe {
         let (display, monitors) = get_monitors();
-
-        debug!("{:#?}", monitors);
 
         info!("Starting render loop");
 
