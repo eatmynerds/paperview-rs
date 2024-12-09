@@ -185,7 +185,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Loading images");
 
     let image_dir = Path::new(&args.path);
-
     let images_count = fs::read_dir(image_dir)
         .expect("Failed to open bitmap directory")
         .count();
@@ -193,7 +192,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut images: Vec<imlib_rs::Imlib_Image> = Vec::with_capacity(images_count);
 
     for i in 0..images_count {
-        let image_path = image_dir.join(format!("{}-{}.bmp", args.path, i));
+        let a = format!("{}", args.path.strip_suffix("/").unwrap_or(&args.path));
+        let image_path = image_dir.join(format!("{}-{}.bmp", a, i));
 
         unsafe {
             let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
