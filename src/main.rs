@@ -43,13 +43,16 @@ fn safe_ptr_cast<A, B>(a: *mut A) -> *mut B {
     a.cast()
 }
 
-unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
-    let atom_root =
-        x11::xlib::XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, false as i32);
-
-    let atom_eroot = x11::xlib::XInternAtom(
+unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: &Monitor) {
+    let atom_root: x11::xlib::Atom = x11::xlib::XInternAtom(
         display,
-        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
+        CString::new("_XROOTPMAP_ID").unwrap().as_ptr() as *const i8,
+        false as i32,
+    );
+
+    let atom_eroot: x11::xlib::Atom = x11::xlib::XInternAtom(
+        display,
+        CString::new("ESETROOT_PMAP_ID").unwrap().as_ptr() as *const i8,
         false as i32,
     );
 
@@ -139,6 +142,8 @@ unsafe fn run(
 ) {
     for monitor in monitors {
         imlib_rs::imlib_context_push(monitor.render_context);
+        imlib_rs::imlib_context_set_dither(1);
+        imlib_rs::imlib_context_set_blend(1);
         imlib_rs::imlib_context_set_image(current_image);
 
         let original_width = imlib_rs::imlib_image_get_width();
@@ -156,13 +161,19 @@ unsafe fn run(
         imlib_rs::imlib_context_set_image(scaled_image);
         imlib_rs::imlib_render_image_on_drawable(0, 0);
 
-        set_root_atoms(display, *monitor);
+        set_root_atoms(display, monitor);
 
+        // ----
+
+        x11::xlib::XKillClient(display, x11::xlib::AllTemporary as u64);
+        x11::xlib::XSetCloseDownMode(display, x11::xlib::RetainTemporary);
         x11::xlib::XSetWindowBackgroundPixmap(display, monitor.root, monitor.pixmap);
         x11::xlib::XClearWindow(display, monitor.root);
         x11::xlib::XFlush(display);
+        x11::xlib::XSync(display, false as i32);
 
         imlib_rs::imlib_free_image_and_decache();
+        // ----
     }
 }
 
@@ -206,6 +217,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cycle += 1;
             let current: imlib_rs::Imlib_Image = images[cycle % images_count];
 
+            /* TODO: Figure out why it does not render with picom
+            running while the C version does */
             run(display, &monitors.clone(), current);
 
             let timeout = Duration::from_nanos(
