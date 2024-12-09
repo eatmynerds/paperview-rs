@@ -1,15 +1,16 @@
-#![allow(dead_code)]
 extern crate imlib_rs;
 
 use clap::Parser;
 use core::mem::{align_of, size_of};
+use env_logger::Env;
+use log::debug;
 use std::{
     ffi::{c_long, c_uchar, c_ulong, CString},
     fs,
     path::Path,
     time::Duration,
 };
-use x11::xlib::{Pixmap, Window, XA_PIXMAP};
+use x11::xlib::{Pixmap, Window};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 const TARGET_FPS: u64 = 60;
@@ -52,9 +53,13 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
 
     let screen_count = x11::xlib::XScreenCount(display);
 
+    debug!("Found {} screens", screen_count);
+
     let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
 
-    for current_screen in 0..=screen_count {
+    for current_screen in 0..=screen_count - 1 {
+        debug!("Running screen {}", current_screen);
+
         let width = x11::xlib::XDisplayWidth(display, current_screen);
         let height = x11::xlib::XDisplayHeight(display, current_screen);
         let depth = x11::xlib::XDefaultDepth(display, current_screen);
@@ -66,6 +71,11 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
         }
 
         let cm = x11::xlib::XDefaultColormap(display, current_screen);
+        debug!(
+            "Screen {}: width: {}, height: {}, depth: {}",
+            current_screen, width, height, depth
+        );
+
         let root = x11::xlib::XRootWindow(display, current_screen);
         let pixmap =
             x11::xlib::XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
@@ -87,6 +97,8 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
         imlib_rs::imlib_context_pop();
     }
 
+    debug!("Loaded {} screens", screen_count);
+
     (display, monitors)
 }
 
@@ -94,20 +106,17 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     let mut r#type: x11::xlib::Atom = 0;
 
     let mut data_root: *mut c_uchar = c_uchar::from(1) as *mut c_uchar;
-    let mut data_eroot: *mut c_uchar = std::ptr::null_mut();
+    let data_eroot: *mut c_uchar = std::ptr::null_mut();
     let mut format: i32 = 0;
     let mut length: c_ulong = 0;
     let mut after: c_ulong = 128;
 
-    let mut atom_root: x11::xlib::Atom = x11::xlib::XInternAtom(
-        display,
-        CString::new("_XROOTMAP_ID").unwrap().as_ptr() as *const i8,
-        true as i32,
-    );
+    let mut atom_root: x11::xlib::Atom =
+        x11::xlib::XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, true as i32);
 
     let mut atom_eroot: x11::xlib::Atom = x11::xlib::XInternAtom(
         display,
-        CString::new("ESETROOT_PMAP_ID").unwrap().as_ptr() as *const i8,
+        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
         true as i32,
     );
 
@@ -126,21 +135,35 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
             &mut after as *mut c_ulong,
             &mut data_root as *mut *mut c_uchar,
         );
+
+        if (r#type == x11::xlib::XA_PIXMAP) {
+            x11::xlib::XGetWindowProperty(
+                display,
+                monitor.root,
+                atom_eroot,
+                0 as c_long,
+                1 as c_long,
+                false as i32,
+                x11::xlib::AnyPropertyType as u64,
+                &mut r#type as *mut x11::xlib::Atom,
+                &mut format as *mut i32,
+                &mut length as *mut c_ulong,
+                &mut after as *mut c_ulong,
+                &mut data_root as *mut *mut c_uchar,
+            );
+        }
     }
 
-    atom_root = x11::xlib::XInternAtom(
-        display,
-        CString::new("_XROOTMAP_ID").unwrap().as_ptr() as *const i8,
-        false as i32,
-    );
+    atom_root =
+        x11::xlib::XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, false as i32);
 
     atom_eroot = x11::xlib::XInternAtom(
         display,
-        CString::new("ESETROOT_PMAP_ID").unwrap().as_ptr() as *const i8,
+        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
         false as i32,
     );
 
-    let pixmap_ptr: *const c_uchar = monitor.pixmap as *const c_uchar;
+    let monitor_pixmap = monitor.pixmap as u8;
 
     x11::xlib::XChangeProperty(
         display,
@@ -149,26 +172,25 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
         x11::xlib::XA_PIXMAP,
         32,
         x11::xlib::PropModeReplace,
-        pixmap_ptr,
+        &monitor_pixmap as *const u8,
         1,
     );
 
-    // x11::xlib::XChangeProperty(
-    //     display,
-    //     monitor.root,
-    //     atom_eroot,
-    //     x11::xlib::XA_PIXMAP,
-    //     32,
-    //     x11::xlib::PropModeReplace,
-    //     pixmap_ptr,
-    //     1,
-    // );
+    x11::xlib::XChangeProperty(
+        display,
+        monitor.root,
+        atom_eroot,
+        x11::xlib::XA_PIXMAP,
+        32,
+        x11::xlib::PropModeReplace,
+        &monitor_pixmap as *const u8,
+        1,
+    );
 }
 
 unsafe fn run(
     display: *mut x11::xlib::_XDisplay,
     monitors: Vec<Monitor>,
-    images_count: usize,
     current: imlib_rs::Imlib_Image,
 ) {
     for (i, _) in monitors.iter().enumerate() {
@@ -192,21 +214,33 @@ unsafe fn run(
         );
 
         imlib_rs::imlib_context_set_image(scaled_image);
+
         imlib_rs::imlib_render_image_on_drawable(0, 0);
+
         set_root_atoms(display, c_monitor);
+        x11::xlib::XKillClient(display, x11::xlib::AllTemporary as u64);
+        x11::xlib::XSetCloseDownMode(display, x11::xlib::RetainTemporary);
+        x11::xlib::XSetWindowBackgroundPixmap(display, c_monitor.root, c_monitor.pixmap);
+        x11::xlib::XClearWindow(display, c_monitor.root);
+        x11::xlib::XFlush(display);
+        x11::xlib::XSync(display, false as i32);
+
+        imlib_rs::imlib_free_image_and_decache();
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+
     let args = CliImagePath::parse();
+
+    debug!("Loading images");
 
     let image_dir = Path::new(&args.path);
 
     let images_count = fs::read_dir(image_dir)
         .expect("Failed to open bitmap directory")
         .count();
-
-    println!("Found {} images", images_count);
 
     let mut images: Vec<imlib_rs::Imlib_Image> = Vec::with_capacity(images_count);
 
@@ -220,10 +254,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    debug!("Loading monitors");
+
     unsafe {
         let (display, monitors) = get_monitors();
 
-        println!("Starting the program...");
+        debug!("Starting render loop");
+
+        debug!("Starting the program...");
 
         let mut cycle = 0;
 
@@ -231,7 +269,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cycle += 1;
             let current: imlib_rs::Imlib_Image = images[cycle % images_count];
 
-            run(display, monitors.clone(), images_count, current);
+            run(display, monitors.clone(), current);
 
             let timeout = Duration::from_nanos(
                 (MICROSECONDS_PER_SECOND / TARGET_FPS) * 1_000, // nanoseconds
