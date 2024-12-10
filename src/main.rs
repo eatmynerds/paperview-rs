@@ -13,7 +13,6 @@ const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
 #[derive(Clone, Copy, Debug)]
 struct Monitor {
-    refresh_rate: f32,
     root: Window,
     pixmap: Pixmap,
     width: usize,
@@ -28,6 +27,7 @@ struct BackgroundInfo {
     x: i32,
     y: i32,
     image_path: String,
+    fps: f32,
     current_image: imlib_rs::Imlib_Image,
     images: Vec<imlib_rs::Imlib_Image>
 }
@@ -37,17 +37,26 @@ impl FromStr for BackgroundInfo {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut chars = s.split(":");
-        let width = chars.next().expect("Failed to parse width!");
-        let height = chars.next().expect("Failed to parse height!");
-        let x = chars.next().expect("Failed to parse x!");
-        let y = chars.next().expect("Failed to parse y!");
-        let image_path = chars.next().expect("Failed to parse image_path!");
+        let mut width = chars.next().expect("Failed to parse width!");
+        let mut height = chars.next().expect("Failed to parse height!");
+        let mut x = chars.next().expect("Failed to parse x!");
+        let mut y = chars.next().expect("Failed to parse y!");
+        let image_path = chars.next().expect("Failed to parse image path!");
+        let mut fps = chars.next().expect("Failed to parse frames per second!");
+
+
+        let width: i32 = width.parse().expect("Failed to parse width to i32!");
+        let height: i32 = height.parse().expect("Failed to parse height to i32!");
+        let x: i32 = x.parse().expect("Failed to parse x to i32!");
+        let y: i32 = y.parse().expect("Failed to parse y to i32!");
+        let fps: f32 = fps.parse().expect("Failed to parse frames per second to f32!");
 
         Ok(Self {
-            width: width.parse().unwrap(),
-            height: height.parse().unwrap(),
-            x: x.parse().unwrap(),
-            y: y.parse().unwrap(),
+            width,
+            height,
+            x,
+            y,
+            fps,
             image_path: image_path.to_string(),
             current_image: std::ptr::null_mut(),
             images: vec![]
@@ -58,10 +67,11 @@ impl FromStr for BackgroundInfo {
 impl BackgroundInfo {
     fn new() -> Self {
         Self {
-            x: 0,
-            y: 0,
             width: 0,
             height: 0,
+            x: 0,
+            y: 0,
+            fps: 0.0,
             image_path: String::new(),
             current_image: std::ptr::null_mut(),
             images: vec![]
@@ -138,9 +148,7 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
 
     let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
 
-    let display_infos = DisplayInfo::all().unwrap();
-
-    for (current_screen, display_info) in (0..screen_count).zip(display_infos) {
+    for current_screen  in 0..screen_count {
         info!("Running screen {}", current_screen);
 
         let width = x11::xlib::XDisplayWidth(display, current_screen);
@@ -165,7 +173,6 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
             x11::xlib::XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
 
         monitors.push(Monitor {
-            refresh_rate: display_info.frequency,
             root,
             pixmap,
             width: width as usize,
@@ -242,7 +249,7 @@ unsafe fn render(
         cycle += 1;
 
         let timeout = Duration::from_nanos(
-            (MICROSECONDS_PER_SECOND / monitor.refresh_rate as u64) * 1_000, // nanoseconds
+            (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
         );
 
         std::thread::sleep(timeout);
