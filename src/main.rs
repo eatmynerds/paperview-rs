@@ -4,7 +4,7 @@ use clap::Parser;
 use core::mem::{align_of, size_of};
 use display_info::DisplayInfo;
 use env_logger::Env;
-use log::info;
+use log::{error, info};
 use std::{ffi::CString, fs, path::Path, time::Duration};
 use x11::xlib::{Pixmap, Window};
 
@@ -28,6 +28,8 @@ struct CliImagePath {
         help = "Path to the directory containing the bitmap images"
     )]
     path: String,
+    #[arg(short, long, help = "The root window to set the wallpaper on")]
+    root_window: Option<u64>,
 }
 
 /// Struct for safe casts, from bytemuck
@@ -82,19 +84,23 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     );
 }
 
-unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
+unsafe fn get_monitors(root_window: Option<u64>) -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
     let display = x11::xlib::XOpenDisplay(std::ptr::null());
 
     let screen_count = x11::xlib::XScreenCount(display);
 
-    info!("Found {} screens", screen_count);
+    if root_window.is_none() {
+        info!("Found {} screens", screen_count);
+    }
 
     let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
 
     let display_infos = DisplayInfo::all().unwrap();
 
     for (current_screen, display_info) in (0..screen_count).zip(display_infos) {
-        info!("Running screen {}", current_screen);
+        if root_window.is_none() {
+            info!("Running screen {}", current_screen);
+        }
 
         let width = x11::xlib::XDisplayWidth(display, current_screen);
         let height = x11::xlib::XDisplayHeight(display, current_screen);
@@ -107,10 +113,13 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
         }
 
         let cm = x11::xlib::XDefaultColormap(display, current_screen);
-        info!(
-            "Screen {}: width: {}, height: {}, depth: {}",
-            current_screen, width, height, depth
-        );
+
+        if root_window.is_none() {
+            info!(
+                "Screen {}: width: {}, height: {}, depth: {}",
+                current_screen, width, height, depth
+            );
+        }
 
         let root = x11::xlib::XRootWindow(display, current_screen);
         let pixmap =
@@ -134,7 +143,9 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
         imlib_rs::imlib_context_pop();
     }
 
-    info!("Loaded {} screens", screen_count);
+    if root_window.is_none() {
+        info!("Loaded {} screens", screen_count);
+    }
 
     (display, monitors)
 }
@@ -203,8 +214,6 @@ fn main() {
 
     let args = CliImagePath::parse();
 
-    info!("Loading images");
-
     let image_dir = Path::new(&args.path);
 
     let images_count = fs::read_dir(image_dir)
@@ -223,17 +232,34 @@ fn main() {
         }
     }
 
-    info!("Loading monitors");
+    let x = std::env::current_exe().unwrap();
+    if !x.as_path().exists() {
+        error!(
+            "Failed to find the executable at the expected path: {}",
+            x.as_path().display()
+        );
+        std::process::exit(1);
+    }
 
     unsafe {
-        let (display, monitors) = get_monitors();
+        let (display, monitors) = get_monitors(args.root_window);
 
-        info!("Starting render loop");
+        if args.root_window.is_none() {
+            for monitor in monitors {
+                let _ = std::process::Command::new(format!("{}", x.as_path().display()))
+                    .arg("--path")
+                    .arg(image_dir)
+                    .arg("--root-window")
+                    .arg(monitor.root.to_string())
+                    .spawn()
+                    .unwrap();
 
-        info!("Starting the program...");
+                info!("Starting render loop");
 
-        for monitor in monitors {
-            render(display, monitor, images.clone(), images_count);
+                info!("Starting the program...");
+
+                render(display, monitor, images.clone(), images_count);
+            }
         }
     }
 }
