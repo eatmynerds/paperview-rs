@@ -195,7 +195,7 @@ unsafe fn run(
     imlib_rs::imlib_context_push(monitor.render_context);
     imlib_rs::imlib_context_set_dither(1);
     imlib_rs::imlib_context_set_blend(1);
-    imlib_rs::imlib_context_set_image(background_info.images[0]);
+    imlib_rs::imlib_context_set_image(background_info.current_image);
 
     let original_width = imlib_rs::imlib_image_get_width();
     let original_height = imlib_rs::imlib_image_get_height();
