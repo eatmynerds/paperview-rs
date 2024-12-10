@@ -7,6 +7,7 @@ use env_logger::Env;
 use log::{error, info};
 use std::{ffi::CString, fs, path::Path, time::Duration};
 use x11::xlib::{Pixmap, Window};
+use std::str::FromStr;
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
@@ -20,17 +21,61 @@ struct Monitor {
     render_context: imlib_rs::Imlib_Context,
 }
 
+#[derive(Clone, Debug)]
+struct BackgroundInfo {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    image_path: String,
+    current_image: imlib_rs::Imlib_Image,
+    images: Vec<imlib_rs::Imlib_Image>
+}
+
+impl FromStr for BackgroundInfo {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut chars = s.split(":");
+        let x = chars.next().expect("Failed to parse x!");
+        let y = chars.next().expect("Failed to parse y!");
+        let width = chars.next().expect("Failed to parse width!");
+        let height = chars.next().expect("Failed to parse height!");
+        let image_path = chars.next().expect("Failed to parse image_path!");
+
+        Ok(Self {
+            x: x.parse().unwrap(),
+            y: y.parse().unwrap(),
+            width: width.parse().unwrap(),
+            height: height.parse().unwrap(),
+            image_path: image_path.to_string(),
+            current_image: std::ptr::null_mut(),
+            images: vec![]
+        })
+    }
+}
+
+impl BackgroundInfo {
+    fn new() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            image_path: String::new(),
+            current_image: std::ptr::null_mut(),
+            images: vec![]
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 struct CliImagePath {
-    #[arg(short, long, help = "The root window to set the wallpaper on")]
-    root_window: Option<u64>,
-    #[arg(
-        short,
-        long,
-        help = "Path to the directory containing the bitmap images"
-    )]
-    bitmaps: Option<Vec<String>>,
+    #[arg(short)]
+    bg: Vec<String>,
 }
+
+
 
 /// Struct for safe casts, from bytemuck
 struct Cast<A, B>((A, B));
@@ -84,23 +129,19 @@ unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     );
 }
 
-unsafe fn get_monitors(root_window: Option<u64>) -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
+unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
     let display = x11::xlib::XOpenDisplay(std::ptr::null());
 
     let screen_count = x11::xlib::XScreenCount(display);
 
-    if root_window.is_none() {
-        info!("Found {} screens", screen_count);
-    }
+    info!("Found {} screens", screen_count);
 
     let mut monitors: Vec<Monitor> = Vec::with_capacity(screen_count as usize);
 
     let display_infos = DisplayInfo::all().unwrap();
 
     for (current_screen, display_info) in (0..screen_count).zip(display_infos) {
-        if root_window.is_none() {
-            info!("Running screen {}", current_screen);
-        }
+        info!("Running screen {}", current_screen);
 
         let width = x11::xlib::XDisplayWidth(display, current_screen);
         let height = x11::xlib::XDisplayHeight(display, current_screen);
@@ -114,12 +155,10 @@ unsafe fn get_monitors(root_window: Option<u64>) -> (*mut x11::xlib::_XDisplay, 
 
         let cm = x11::xlib::XDefaultColormap(display, current_screen);
 
-        if root_window.is_none() {
-            info!(
-                "Screen {}: width: {}, height: {}, depth: {}",
-                current_screen, width, height, depth
-            );
-        }
+        info!(
+            "Screen {}: width: {}, height: {}, depth: {}",
+            current_screen, width, height, depth
+        );
 
         let root = x11::xlib::XRootWindow(display, current_screen);
         let pixmap =
@@ -143,9 +182,7 @@ unsafe fn get_monitors(root_window: Option<u64>) -> (*mut x11::xlib::_XDisplay, 
         imlib_rs::imlib_context_pop();
     }
 
-    if root_window.is_none() {
-        info!("Loaded {} screens", screen_count);
-    }
+    info!("Loaded {} screens", screen_count);
 
     (display, monitors)
 }
@@ -153,12 +190,12 @@ unsafe fn get_monitors(root_window: Option<u64>) -> (*mut x11::xlib::_XDisplay, 
 unsafe fn run(
     display: *mut x11::xlib::_XDisplay,
     monitor: Monitor,
-    current_image: imlib_rs::Imlib_Image,
+    mut background_info: BackgroundInfo
 ) {
     imlib_rs::imlib_context_push(monitor.render_context);
     imlib_rs::imlib_context_set_dither(1);
     imlib_rs::imlib_context_set_blend(1);
-    imlib_rs::imlib_context_set_image(current_image);
+    imlib_rs::imlib_context_set_image(background_info.images[0]);
 
     let original_width = imlib_rs::imlib_image_get_width();
     let original_height = imlib_rs::imlib_image_get_height();
@@ -168,12 +205,13 @@ unsafe fn run(
         0,
         original_width,
         original_height,
-        monitor.width as i32,
-        monitor.height as i32,
+        background_info.x as i32, 
+        background_info.y as i32, 
     );
 
+
     imlib_rs::imlib_context_set_image(scaled_image);
-    imlib_rs::imlib_render_image_on_drawable(0, 0);
+    imlib_rs::imlib_render_image_on_drawable(background_info.width, background_info.height);
 
     set_root_atoms(display, monitor);
 
@@ -190,16 +228,15 @@ unsafe fn run(
 unsafe fn render(
     display: *mut x11::xlib::_XDisplay,
     monitor: Monitor,
-    images: Vec<imlib_rs::Imlib_Image>,
-    images_count: usize,
+    mut monitor_background_info: Vec<BackgroundInfo>
 ) {
     let mut cycle = 0;
 
     loop {
         cycle += 1;
-        let current: imlib_rs::Imlib_Image = images[cycle % images_count];
+        monitor_background_info[0].current_image = monitor_background_info[0].images[cycle % monitor_background_info[0].images.len()];
 
-        run(display, monitor, current);
+        run(display, monitor, monitor_background_info[0].clone());
 
         let timeout = Duration::from_nanos(
             (MICROSECONDS_PER_SECOND / monitor.refresh_rate as u64) * 1_000, // nanoseconds
@@ -214,29 +251,31 @@ fn main() {
 
     let args = CliImagePath::parse();
 
-    let bitmaps = args.bitmaps.unwrap();
+    let mut monitor_background_info: Vec<BackgroundInfo> = vec![];
 
-    let mut images: Vec<Vec<imlib_rs::Imlib_Image>> = vec![];
+    for background in args.bg {
+        let mut bg: BackgroundInfo = BackgroundInfo::from_str(background.as_str()).unwrap();
 
-    for bitmap in &bitmaps {
-        let image_dir = Path::new(bitmap);
+        let image_dir = Path::new(&bg.image_path);
 
-        let mut image_set = Vec::new();
         let images_count = fs::read_dir(image_dir)
             .expect("Failed to open bitmap directory")
             .count();
 
         for i in 0..images_count {
-            let image_path = image_dir.join(format!("{}-{}.bmp", bitmap, i));
+            let image_path = image_dir.join(format!("{}-{}.bmp", image_dir.display(), i));
+
 
             unsafe {
                 let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
                 let image = imlib_rs::imlib_load_image(image_path_c_str.as_ptr() as *const i8);
-                image_set.push(image);
+                bg.images.push(image);
             }
+
+
         }
 
-        images.push(image_set);
+        monitor_background_info.push(bg);
     }
 
     let x = std::env::current_exe().unwrap();
@@ -249,26 +288,15 @@ fn main() {
     }
 
     unsafe {
-        let (display, monitors) = get_monitors(args.root_window);
+       let (display, monitors) = get_monitors();
 
-        if args.root_window.is_none() {
-            for (i, (monitor, image_dir)) in
-                monitors.into_iter().zip(images.into_iter()).enumerate()
-            {
-                let _ = std::process::Command::new(format!("{}", x.as_path().display()))
-                    .arg("--bitmaps")
-                    .arg(&bitmaps[i])
-                    .arg("--root-window")
-                    .arg(monitor.root.to_string())
-                    .spawn()
-                    .unwrap();
+        for monitor in monitors {
+            info!("Starting render loop");
 
-                info!("Starting render loop");
+            info!("Starting the program...");
 
-                info!("Starting the program...");
-
-                render(display, monitor, image_dir.clone(), image_dir.len());
-            }
+            render(display, monitor, monitor_background_info.clone());
         }
+        
     }
 }

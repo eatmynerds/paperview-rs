@@ -548,6 +548,7 @@ checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
 name = "paperview-rs"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "display-info",
  "env_logger",
