@@ -22,14 +22,14 @@ struct Monitor {
 
 #[derive(Parser, Debug)]
 struct CliImagePath {
+    #[arg(short, long, help = "The root window to set the wallpaper on")]
+    root_window: Option<u64>,
     #[arg(
         short,
         long,
         help = "Path to the directory containing the bitmap images"
     )]
-    path: String,
-    #[arg(short, long, help = "The root window to set the wallpaper on")]
-    root_window: Option<u64>,
+    bitmaps: Option<Vec<String>>,
 }
 
 /// Struct for safe casts, from bytemuck
@@ -214,22 +214,29 @@ fn main() {
 
     let args = CliImagePath::parse();
 
-    let image_dir = Path::new(&args.path);
+    let bitmaps = args.bitmaps.unwrap();
 
-    let images_count = fs::read_dir(image_dir)
-        .expect("Failed to open bitmap directory")
-        .count();
+    let mut images: Vec<Vec<imlib_rs::Imlib_Image>> = vec![];
 
-    let mut images: Vec<imlib_rs::Imlib_Image> = Vec::with_capacity(images_count);
+    for bitmap in &bitmaps {
+        let image_dir = Path::new(bitmap);
 
-    for i in 0..images_count {
-        let image_path = image_dir.join(format!("{}-{}.bmp", args.path, i));
+        let mut image_set = Vec::new();
+        let images_count = fs::read_dir(image_dir)
+            .expect("Failed to open bitmap directory")
+            .count();
 
-        unsafe {
-            let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
-            let image = imlib_rs::imlib_load_image(image_path_c_str.as_ptr() as *const i8);
-            images.push(image);
+        for i in 0..images_count {
+            let image_path = image_dir.join(format!("{}-{}.bmp", bitmap, i));
+
+            unsafe {
+                let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
+                let image = imlib_rs::imlib_load_image(image_path_c_str.as_ptr() as *const i8);
+                image_set.push(image);
+            }
         }
+
+        images.push(image_set);
     }
 
     let x = std::env::current_exe().unwrap();
@@ -245,10 +252,12 @@ fn main() {
         let (display, monitors) = get_monitors(args.root_window);
 
         if args.root_window.is_none() {
-            for monitor in monitors {
+            for (i, (monitor, image_dir)) in
+                monitors.into_iter().zip(images.into_iter()).enumerate()
+            {
                 let _ = std::process::Command::new(format!("{}", x.as_path().display()))
-                    .arg("--path")
-                    .arg(image_dir)
+                    .arg("--bitmaps")
+                    .arg(&bitmaps[i])
                     .arg("--root-window")
                     .arg(monitor.root.to_string())
                     .spawn()
@@ -258,7 +267,7 @@ fn main() {
 
                 info!("Starting the program...");
 
-                render(display, monitor, images.clone(), images_count);
+                render(display, monitor, image_dir.clone(), image_dir.len());
             }
         }
     }
