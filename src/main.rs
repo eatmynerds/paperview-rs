@@ -166,8 +166,6 @@ unsafe fn run(
 
     set_root_atoms(display, monitor);
 
-    // ----
-
     x11::xlib::XSetCloseDownMode(display, x11::xlib::RetainTemporary);
     x11::xlib::XKillClient(display, x11::xlib::AllTemporary as u64);
     x11::xlib::XSetWindowBackgroundPixmap(display, monitor.root, monitor.pixmap);
@@ -208,6 +206,7 @@ fn main() {
     info!("Loading images");
 
     let image_dir = Path::new(&args.path);
+
     let images_count = fs::read_dir(image_dir)
         .expect("Failed to open bitmap directory")
         .count();
@@ -215,8 +214,7 @@ fn main() {
     let mut images: Vec<imlib_rs::Imlib_Image> = Vec::with_capacity(images_count);
 
     for i in 0..images_count {
-        let a = format!("{}", args.path.strip_suffix("/").unwrap_or(&args.path));
-        let image_path = image_dir.join(format!("{}-{}.bmp", a, i));
+        let image_path = image_dir.join(format!("{}-{}.bmp", args.path, i));
 
         unsafe {
             let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
