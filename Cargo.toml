@@ -9,7 +9,9 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
+display-info = "0.5.2"
 env_logger = "0.11.5"
 imlib-rs = { version = "0.1.0", path = "./imlib-rs" }
 log = "0.4.22"
+tokio = { version = "1.42.0", features = ["full"] }
 x11 = { version = "2.21.0", features = ["xlib"] }
