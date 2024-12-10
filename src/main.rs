@@ -23,10 +23,10 @@ struct Monitor {
 
 #[derive(Clone, Debug)]
 struct BackgroundInfo {
-    x: i32,
-    y: i32,
     width: i32,
     height: i32,
+    x: i32,
+    y: i32,
     image_path: String,
     current_image: imlib_rs::Imlib_Image,
     images: Vec<imlib_rs::Imlib_Image>
@@ -37,17 +37,17 @@ impl FromStr for BackgroundInfo {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut chars = s.split(":");
-        let x = chars.next().expect("Failed to parse x!");
-        let y = chars.next().expect("Failed to parse y!");
         let width = chars.next().expect("Failed to parse width!");
         let height = chars.next().expect("Failed to parse height!");
+        let x = chars.next().expect("Failed to parse x!");
+        let y = chars.next().expect("Failed to parse y!");
         let image_path = chars.next().expect("Failed to parse image_path!");
 
         Ok(Self {
-            x: x.parse().unwrap(),
-            y: y.parse().unwrap(),
             width: width.parse().unwrap(),
             height: height.parse().unwrap(),
+            x: x.parse().unwrap(),
+            y: y.parse().unwrap(),
             image_path: image_path.to_string(),
             current_image: std::ptr::null_mut(),
             images: vec![]
@@ -205,13 +205,13 @@ unsafe fn run(
         0,
         original_width,
         original_height,
-        background_info.x as i32, 
-        background_info.y as i32, 
+        background_info.width as i32, 
+        background_info.height as i32, 
     );
 
 
     imlib_rs::imlib_context_set_image(scaled_image);
-    imlib_rs::imlib_render_image_on_drawable(background_info.width, background_info.height);
+    imlib_rs::imlib_render_image_on_drawable(background_info.x, background_info.y);
 
     set_root_atoms(display, monitor);
 
