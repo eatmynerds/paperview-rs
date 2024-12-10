@@ -231,12 +231,15 @@ unsafe fn render(
     mut monitor_background_info: Vec<BackgroundInfo>
 ) {
     let mut cycle = 0;
+    let num_elements = monitor_background_info.len();
 
     loop {
-        cycle += 1;
-        monitor_background_info[0].current_image = monitor_background_info[0].images[cycle % monitor_background_info[0].images.len()];
+        let current_index = cycle % num_elements;
+        let current_info = &mut monitor_background_info[current_index];
+        current_info.current_image = current_info.images[cycle % current_info.images.len()];
 
-        run(display, monitor, monitor_background_info[0].clone());
+        run(display, monitor, current_info.clone());
+        cycle += 1;
 
         let timeout = Duration::from_nanos(
             (MICROSECONDS_PER_SECOND / monitor.refresh_rate as u64) * 1_000, // nanoseconds
@@ -276,15 +279,6 @@ fn main() {
         }
 
         monitor_background_info.push(bg);
-    }
-
-    let x = std::env::current_exe().unwrap();
-    if !x.as_path().exists() {
-        error!(
-            "Failed to find the executable at the expected path: {}",
-            x.as_path().display()
-        );
-        std::process::exit(1);
     }
 
     unsafe {
