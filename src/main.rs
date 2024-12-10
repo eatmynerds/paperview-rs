@@ -278,15 +278,6 @@ fn main() {
         monitor_background_info.push(bg);
     }
 
-    let x = std::env::current_exe().unwrap();
-    if !x.as_path().exists() {
-        error!(
-            "Failed to find the executable at the expected path: {}",
-            x.as_path().display()
-        );
-        std::process::exit(1);
-    }
-
     unsafe {
        let (display, monitors) = get_monitors();
 
