@@ -8,15 +8,23 @@ use log::{error, info};
 use std::{ffi::CString, fs, path::Path, time::Duration};
 use x11::xlib::{Pixmap, Window};
 use std::str::FromStr;
+use image::{Rgba, RgbaImage};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
+
+#[derive(Debug)]
+struct ImageData {
+    image_path: String,
+    image_size: (i32, i32),
+    image_position: (i32, i32)
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Monitor {
     root: Window,
     pixmap: Pixmap,
-    width: usize,
-    height: usize,
+    width: u32,
+    height: u32,
     render_context: imlib_rs::Imlib_Context,
 }
 
@@ -37,19 +45,12 @@ impl FromStr for BackgroundInfo {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut chars = s.split(":");
-        let mut width = chars.next().expect("Failed to parse width!");
-        let mut height = chars.next().expect("Failed to parse height!");
-        let mut x = chars.next().expect("Failed to parse x!");
-        let mut y = chars.next().expect("Failed to parse y!");
+        let width: i32 = chars.next().expect("Failed to parse width!").parse().expect("Incorrect input!");
+        let height: i32 = chars.next().expect("Failed to parse height!").parse().expect("Incorrect input!");
+        let x: i32 = chars.next().expect("Failed to parse x!").parse().expect("Incorrect Input!");
+        let y: i32 = chars.next().expect("Failed to parse y!").parse().expect("Incorrect Input!");
         let image_path = chars.next().expect("Failed to parse image path!");
-        let mut fps = chars.next().expect("Failed to parse frames per second!");
-
-
-        let width: i32 = width.parse().expect("Failed to parse width to i32!");
-        let height: i32 = height.parse().expect("Failed to parse height to i32!");
-        let x: i32 = x.parse().expect("Failed to parse x to i32!");
-        let y: i32 = y.parse().expect("Failed to parse y to i32!");
-        let fps: f32 = fps.parse().expect("Failed to parse frames per second to f32!");
+        let fps: f32 = chars.next().expect("Failed to parse frames per second!").parse().expect("Incorrect Input!");
 
         Ok(Self {
             width,
@@ -64,30 +65,12 @@ impl FromStr for BackgroundInfo {
     }
 }
 
-impl BackgroundInfo {
-    fn new() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            x: 0,
-            y: 0,
-            fps: 0.0,
-            image_path: String::new(),
-            current_image: std::ptr::null_mut(),
-            images: vec![]
-        }
-    }
-}
-
 #[derive(Parser, Debug)]
 struct CliImagePath {
     #[arg(short)]
     bg: Vec<String>,
 }
 
-
-
-/// Struct for safe casts, from bytemuck
 struct Cast<A, B>((A, B));
 impl<A, B> Cast<A, B> {
     const ASSERT_ALIGN_GREATER_THAN_EQUAL: () = assert!(align_of::<A>() >= align_of::<B>());
@@ -101,16 +84,45 @@ fn safe_ptr_cast<A, B>(a: *mut A) -> *mut B {
     a.cast()
 }
 
+fn combine_images_with_blank(
+    image_data: Vec<ImageData>,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> RgbaImage {
+    let mut canvas = RgbaImage::from_pixel(canvas_width, canvas_height, Rgba([0, 0, 0, 0]));
+
+    for info in image_data {
+        let img = image::open(&info.image_path).unwrap().into_rgba8();
+
+        let resized_image = image::imageops::resize(
+            &img,
+            info.image_size.0 as u32,
+            info.image_size.1 as u32,
+            image::imageops::FilterType::Nearest,
+        );
+
+        image::imageops::overlay(
+            &mut canvas,
+            &resized_image,
+            info.image_position.0 as i64,
+            info.image_position.1 as i64
+        );
+    }
+
+    canvas
+}
+
+
 unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
     let atom_root = x11::xlib::XInternAtom(
         display,
-        CString::new("_XROOTPMAP_ID").unwrap().as_ptr() as *const i8,
+        c"_XROOTPMAP_ID".as_ptr() as *const i8,
         false as i32,
     );
 
     let atom_eroot = x11::xlib::XInternAtom(
         display,
-        CString::new("ESETROOT_PMAP_ID").unwrap().as_ptr() as *const i8,
+        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
         false as i32,
     );
 
@@ -175,8 +187,8 @@ unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
         monitors.push(Monitor {
             root,
             pixmap,
-            width: width as usize,
-            height: height as usize,
+            width: width as u32,
+            height: height as u32,
             render_context: imlib_rs::imlib_context_new(),
         });
 
@@ -239,20 +251,36 @@ unsafe fn render(
 ) {
     let mut cycle = 0;
     let num_elements = monitor_background_info.len();
+    
+    imlib_rs::imlib_context_push(monitor.render_context);
 
     loop {
         let current_index = cycle % num_elements;
         let current_info = &mut monitor_background_info[current_index];
+
         current_info.current_image = current_info.images[cycle % current_info.images.len()];
+        imlib_rs::imlib_context_image(current_info.current_image);
 
-        run(display, monitor, current_info.clone());
-        cycle += 1;
+        imlib_rs::imlib_save_image(c"temp.bmp".as_ptr() as *const i8);
 
-        let timeout = Duration::from_nanos(
-            (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
-        );
+        // let image_data = vec![ImageData {
+        //     image_path: current_info.current_image, 
+        //     image_size: (current_info.width, current_info.height),
+        //     image_position: (current_info.x, current_info.y)
+        // }];
 
-        std::thread::sleep(timeout);
+        // println!("{:#?}", image_data);
+
+        // let combined_images  =combine_images_with_blank(image_data, monitor.width, monitor.height);
+
+        // run(display, monitor, current_info.clone());
+        // cycle += 1;
+
+        // let timeout = Duration::from_nanos(
+        //     (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
+        // );
+
+        // std::thread::sleep(timeout);
     }
 }
 
