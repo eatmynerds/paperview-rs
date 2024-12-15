@@ -1,4 +1,12 @@
-extern crate imlib_rs;
+use imlib_rs::{
+    imlib_context_push, imlib_context_set_blend, imlib_context_set_dither, imlib_context_set_image,
+    imlib_create_cropped_scaled_image, imlib_free_image_and_decache, imlib_image_get_height,
+    imlib_image_get_width, imlib_load_image, imlib_render_image_on_drawable,
+};
+use x11::xlib::{
+    AllTemporary, False, RetainTemporary, XClearWindow, XFlush, XKillClient, XSetCloseDownMode,
+    XSetWindowBackgroundPixmap, XSync, _XDisplay,
+};
 
 use clap::Parser;
 use env_logger::Env;
@@ -7,29 +15,30 @@ use std::str::FromStr;
 use std::{ffi::CString, fs, path::Path};
 
 mod models;
-use models::{BackgroundInfo, Cast, CliImagePath, ImageData, Monitor};
-
-mod monitor;
+use models::{DisplayContext, ImageData};
 mod render;
-use monitor::{get_monitors, set_root_atoms};
-use render::render;
+use render::{render, set_root_atoms};
+mod monitor;
+use monitor::{get_monitors, Monitor};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
-unsafe fn run(
-    display: *mut x11::xlib::_XDisplay,
-    monitor: Monitor,
-    background_info: BackgroundInfo,
-) {
-    imlib_rs::imlib_context_push(monitor.render_context);
-    imlib_rs::imlib_context_set_dither(1);
-    imlib_rs::imlib_context_set_blend(1);
-    imlib_rs::imlib_context_set_image(background_info.current_image);
+#[derive(Parser, Debug)]
+struct CliArgs {
+    #[arg(short, long)]
+    bg: Vec<String>,
+}
 
-    let original_width = imlib_rs::imlib_image_get_width();
-    let original_height = imlib_rs::imlib_image_get_height();
+unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: DisplayContext) {
+    imlib_context_push(monitor.render_context);
+    imlib_context_set_dither(1);
+    imlib_context_set_blend(1);
+    imlib_context_set_image(background_info.current_image);
 
-    let scaled_image = imlib_rs::imlib_create_cropped_scaled_image(
+    let original_width = imlib_image_get_width();
+    let original_height = imlib_image_get_height();
+
+    let scaled_image = imlib_create_cropped_scaled_image(
         0,
         0,
         original_width,
@@ -38,30 +47,30 @@ unsafe fn run(
         background_info.height as i32,
     );
 
-    imlib_rs::imlib_context_set_image(scaled_image);
-    imlib_rs::imlib_render_image_on_drawable(background_info.x, background_info.y);
+    imlib_context_set_image(scaled_image);
+    imlib_render_image_on_drawable(background_info.x, background_info.y);
 
     set_root_atoms(display, monitor);
 
-    x11::xlib::XSetCloseDownMode(display, x11::xlib::RetainTemporary);
-    x11::xlib::XKillClient(display, x11::xlib::AllTemporary as u64);
-    x11::xlib::XSetWindowBackgroundPixmap(display, monitor.root, monitor.pixmap);
-    x11::xlib::XClearWindow(display, monitor.root);
-    x11::xlib::XFlush(display);
-    x11::xlib::XSync(display, false as i32);
+    XSetCloseDownMode(display, RetainTemporary);
+    XKillClient(display, AllTemporary as u64);
+    XSetWindowBackgroundPixmap(display, monitor.root, monitor.pixmap);
+    XClearWindow(display, monitor.root);
+    XFlush(display);
+    XSync(display, False);
 
-    imlib_rs::imlib_free_image_and_decache();
+    imlib_free_image_and_decache();
 }
 
 fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
 
-    let args = CliImagePath::parse();
+    let args = CliArgs::parse();
 
-    let mut monitor_background_info: Vec<BackgroundInfo> = vec![];
+    let mut display_contexts: Vec<DisplayContext> = vec![];
 
     for background in args.bg {
-        let mut bg: BackgroundInfo = BackgroundInfo::from_str(background.as_str()).unwrap();
+        let mut bg: DisplayContext = DisplayContext::from_str(background.as_str()).unwrap();
 
         let image_dir = Path::new(&bg.image_path);
 
@@ -74,12 +83,12 @@ fn main() {
 
             unsafe {
                 let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
-                let image = imlib_rs::imlib_load_image(image_path_c_str.as_ptr() as *const i8);
+                let image = imlib_load_image(image_path_c_str.as_ptr() as *const i8);
                 bg.images.push(image);
             }
         }
 
-        monitor_background_info.push(bg);
+        display_contexts.push(bg);
     }
 
     unsafe {
@@ -90,7 +99,7 @@ fn main() {
 
             info!("Starting the program...");
 
-            render(display, monitor, monitor_background_info.clone());
+            render(display, monitor, display_contexts.clone());
         }
     }
 }

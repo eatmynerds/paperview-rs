@@ -1,6 +1,8 @@
-use crate::{BackgroundInfo, ImageData, Monitor};
+use crate::{DisplayContext, ImageData, Monitor};
 use image::{Rgba, RgbaImage};
+use imlib_rs::{imlib_context_push, imlib_context_set_image, imlib_save_image};
 use std::ffi::CString;
+use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
 
 fn combine_images_with_blank(
     image_data: Vec<ImageData>,
@@ -30,14 +32,44 @@ fn combine_images_with_blank(
     canvas
 }
 
-pub unsafe fn render(
-    display: *mut x11::xlib::_XDisplay,
-    monitor: Monitor,
-    mut monitor_background_info: Vec<BackgroundInfo>,
-) {
-    let num_elements = monitor_background_info.len();
+pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
+    let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
 
-    imlib_rs::imlib_context_push(monitor.render_context);
+    let atom_eroot = XInternAtom(display, c"ESETROOT_PMAP_ID".as_ptr() as *const i8, False);
+
+    let monitor_pixmap = monitor.pixmap as u64;
+
+    XChangeProperty(
+        display,
+        monitor.root,
+        atom_root,
+        XA_PIXMAP,
+        32,
+        PropModeReplace,
+        &monitor_pixmap as *const u64 as *const u8,
+        1,
+    );
+
+    XChangeProperty(
+        display,
+        monitor.root,
+        atom_eroot,
+        XA_PIXMAP,
+        32,
+        PropModeReplace,
+        &monitor_pixmap as *const u64 as *const u8,
+        1,
+    );
+}
+
+pub unsafe fn render(
+    display: *mut _XDisplay,
+    monitor: Monitor,
+    mut display_context: Vec<DisplayContext>,
+) {
+    let num_elements = display_context.len();
+
+    imlib_context_push(monitor.render_context);
 
     let mut cycle = 0;
 
@@ -45,15 +77,15 @@ pub unsafe fn render(
         let mut image_data: Vec<ImageData> = vec![];
 
         for element in 0..num_elements {
-            let current_info = &mut monitor_background_info[element];
+            let current_info = &mut display_context[element];
             current_info.current_image = current_info.images[cycle % current_info.images.len()];
 
-            imlib_rs::imlib_context_set_image(current_info.current_image);
+            imlib_context_set_image(current_info.current_image);
 
             let image_path_str = CString::new(format!("temp-bitmap-{}.bmp", element))
                 .expect("Failed to convert filename to c-string!");
 
-            imlib_rs::imlib_save_image(image_path_str.as_ptr() as *const i8);
+            imlib_save_image(image_path_str.as_ptr() as *const i8);
 
             let temp_bitmap =
                 std::fs::canonicalize(format!("temp-bitmap-{}.bmp", element)).unwrap();

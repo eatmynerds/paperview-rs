@@ -1,48 +1,40 @@
-use crate::{Cast, Monitor};
+use imlib_rs::{
+    imlib_context_new, imlib_context_pop, imlib_context_push, imlib_context_set_color_range,
+    imlib_context_set_colormap, imlib_context_set_display, imlib_context_set_drawable,
+    imlib_context_set_visual, imlib_create_color_range, Imlib_Context,
+};
 use log::info;
+use x11::xlib::{
+    Pixmap, Window, XCreatePixmap, XDefaultColormap, XDefaultDepth, XDefaultVisual, XDisplayHeight,
+    XDisplayWidth, XOpenDisplay, XRootWindow, XScreenCount, _XDisplay,
+};
 
-pub unsafe fn set_root_atoms(display: *mut x11::xlib::_XDisplay, monitor: Monitor) {
-    let atom_root = x11::xlib::XInternAtom(
-        display,
-        c"_XROOTPMAP_ID".as_ptr() as *const i8,
-        false as i32,
-    );
-
-    let atom_eroot = x11::xlib::XInternAtom(
-        display,
-        c"ESETROOT_PMAP_ID".as_ptr() as *const i8,
-        false as i32,
-    );
-
-    let monitor_pixmap = monitor.pixmap as u64;
-
-    x11::xlib::XChangeProperty(
-        display,
-        monitor.root,
-        atom_root,
-        x11::xlib::XA_PIXMAP,
-        32,
-        x11::xlib::PropModeReplace,
-        &monitor_pixmap as *const u64 as *const u8,
-        1,
-    );
-
-    x11::xlib::XChangeProperty(
-        display,
-        monitor.root,
-        atom_eroot,
-        x11::xlib::XA_PIXMAP,
-        32,
-        x11::xlib::PropModeReplace,
-        &monitor_pixmap as *const u64 as *const u8,
-        1,
-    );
+#[derive(Clone, Copy, Debug)]
+pub struct Monitor {
+    pub root: Window,
+    pub pixmap: Pixmap,
+    pub width: u32,
+    pub height: u32,
+    pub render_context: Imlib_Context,
 }
 
-pub unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
-    let display = x11::xlib::XOpenDisplay(std::ptr::null());
+struct Cast<A, B>((A, B));
+impl<A, B> Cast<A, B> {
+    const ASSERT_ALIGN_GREATER_THAN_EQUAL: () = assert!(align_of::<A>() >= align_of::<B>());
+    const ASSERT_SIZE_EQUAL: () = assert!(size_of::<A>() == size_of::<B>());
 
-    let screen_count = x11::xlib::XScreenCount(display);
+    fn safe_ptr_cast(a: *mut A) -> *mut B {
+        let _ = Self::ASSERT_SIZE_EQUAL;
+        let _ = Self::ASSERT_ALIGN_GREATER_THAN_EQUAL;
+
+        a.cast()
+    }
+}
+
+pub unsafe fn get_monitors() -> (*mut _XDisplay, Vec<Monitor>) {
+    let display = XOpenDisplay(std::ptr::null());
+
+    let screen_count = XScreenCount(display);
 
     info!("Found {} screens", screen_count);
 
@@ -51,10 +43,10 @@ pub unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
     for current_screen in 0..screen_count {
         info!("Running screen {}", current_screen);
 
-        let width = x11::xlib::XDisplayWidth(display, current_screen);
-        let height = x11::xlib::XDisplayHeight(display, current_screen);
-        let depth = x11::xlib::XDefaultDepth(display, current_screen);
-        let visual = x11::xlib::XDefaultVisual(display, current_screen);
+        let width = XDisplayWidth(display, current_screen);
+        let height = XDisplayHeight(display, current_screen);
+        let depth = XDefaultDepth(display, current_screen);
+        let visual = XDefaultVisual(display, current_screen);
 
         // Total insanity because for some reason for my second monitor it just
         // returns 0x8 and segfaults on imlib_context_set_visual
@@ -62,32 +54,31 @@ pub unsafe fn get_monitors() -> (*mut x11::xlib::_XDisplay, Vec<Monitor>) {
             continue;
         }
 
-        let cm = x11::xlib::XDefaultColormap(display, current_screen);
+        let cm = XDefaultColormap(display, current_screen);
 
         info!(
             "Screen {}: width: {}, height: {}, depth: {}",
             current_screen, width, height, depth
         );
 
-        let root = x11::xlib::XRootWindow(display, current_screen);
-        let pixmap =
-            x11::xlib::XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
+        let root = XRootWindow(display, current_screen);
+        let pixmap = XCreatePixmap(display, root, width as u32, height as u32, depth as u32);
 
         monitors.push(Monitor {
             root,
             pixmap,
             width: width as u32,
             height: height as u32,
-            render_context: imlib_rs::imlib_context_new(),
+            render_context: imlib_context_new(),
         });
 
-        imlib_rs::imlib_context_push(monitors[current_screen as usize].render_context);
-        imlib_rs::imlib_context_set_display(display.cast());
-        imlib_rs::imlib_context_set_visual(Cast::safe_ptr_cast(visual));
-        imlib_rs::imlib_context_set_colormap(cm);
-        imlib_rs::imlib_context_set_drawable(pixmap);
-        imlib_rs::imlib_context_set_color_range(imlib_rs::imlib_create_color_range());
-        imlib_rs::imlib_context_pop();
+        imlib_context_push(monitors[current_screen as usize].render_context);
+        imlib_context_set_display(display.cast());
+        imlib_context_set_visual(Cast::safe_ptr_cast(visual));
+        imlib_context_set_colormap(cm);
+        imlib_context_set_drawable(pixmap);
+        imlib_context_set_color_range(imlib_create_color_range());
+        imlib_context_pop();
     }
 
     info!("Loaded {} screens", screen_count);
