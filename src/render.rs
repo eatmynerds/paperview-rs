@@ -80,42 +80,40 @@ unsafe fn composite_images(
         .map(|context| (0..context.images.len()).cycle())
         .collect::<Vec<_>>();
 
-    let max_frames: Vec<_> = display_contexts
-        .iter()
-        .map(|context| context.images.len() - 1)
-        .collect();
-
     // A loop that will iterate through all the possible frame combinations
-    // wizardable-bmp: [0.bmp 1.bmp]
-    // cyberpunk-bmp: [0.bmp 1.bmp 2.bmp, 3.bmp]
+    // wizardable-bmp: [0.bmp 1.bmp] - 60
+    // cyberpunk-bmp: [0.bmp 1.bmp 2.bmp, 3.bmp] - 120
     //
     // 0.bmp + 0.bmp -> output.bmp
     // 1.bmp + 1.bmp -> output.bmp
     // 2.bmp + 0.bmp -> output.bmp
     // 3.bmp + 1.bmp -> output.bmp
     // ....
-    let mut all_frame_combos: Vec<Vec<usize>> = vec![];
 
-    loop {
-        let frame_combo = current_info
-            .iter_mut()
-            .map(|context| context.next().unwrap())
-            .collect::<Vec<_>>();
+    let max_length = display_contexts
+        .iter()
+        .map(|context| context.images.len() as f32 * context.fps)
+        .max_by(f32::total_cmp)
+        .unwrap();
 
-        all_frame_combos.push(frame_combo.clone());
+    let output_fps = display_contexts
+        .iter()
+        .map(|context| context.fps)
+        .max_by(f32::total_cmp)
+        .unwrap();
 
-        if frame_combo
+    let output_frames = (max_length * output_fps) as usize;
+
+    let all_frame_combos = (0..output_frames).map(|frame| {
+        display_contexts
             .iter()
-            .zip(&max_frames)
-            .all(|(frame, &max)| *frame == max)
-        {
-            break;
-        }
-    }
+            .map(|ctx| (frame as f32 * ctx.fps / output_fps) as usize % ctx.images.len())
+            .collect::<Vec<_>>()
+    });
 
     let mut output_frames = vec![];
 
-    for (i, frame_combo) in all_frame_combos.iter().enumerate() {
+    for (i, frame_combo) in all_frame_combos.enumerate() {
         let mut canvas = RgbaImage::from_pixel(
             monitor.width as u32,
             monitor.height as u32,
