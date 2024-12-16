@@ -1,13 +1,20 @@
-use std::{ffi::CString, ops::DerefMut};
+use std::{
+    ffi::{c_void, CString},
+    ops::DerefMut,
+};
 
 use image::{Rgba, RgbaImage};
-use imlib_rs::{ImlibContextPush, ImlibContextSetImage, ImlibSaveImage};
+use imlib_rs::{
+    ImlibContextPush, ImlibContextSetImage, ImlibFreeImageAndDecache, ImlibImage, ImlibLoadImage,
+    ImlibSaveImage,
+};
 use log::info;
 use rayon::prelude::*;
 use std::sync::Mutex;
+use std::time::Duration;
 use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
 
-use crate::{DisplayContext, ImageData, Monitor};
+use crate::{run, DisplayContext, ImageData, Monitor, MICROSECONDS_PER_SECOND};
 
 fn combine_images(image_data: Vec<ImageData>, canvas_width: u32, canvas_height: u32) -> RgbaImage {
     let canvas = Mutex::new(RgbaImage::from_pixel(
@@ -39,7 +46,10 @@ fn combine_images(image_data: Vec<ImageData>, canvas_width: u32, canvas_height: 
     canvas.into_inner().unwrap()
 }
 
-unsafe fn composite_images(monitor: Monitor, display_contexts: Vec<DisplayContext>) {
+unsafe fn composite_images(
+    monitor: Monitor,
+    display_contexts: Vec<DisplayContext>,
+) -> Vec<ImlibImage> {
     info!("Creating bitmap output directory");
     std::fs::create_dir("temp-bmps").expect("Failed to create temporary bitmap directory!");
 
@@ -93,6 +103,8 @@ unsafe fn composite_images(monitor: Monitor, display_contexts: Vec<DisplayContex
         }
     }
 
+    let mut combined_images_loaded = vec![];
+
     for (i, frame_combo) in all_frame_combos.iter().enumerate() {
         let mut combined_frame_paths = vec![];
 
@@ -135,10 +147,20 @@ unsafe fn composite_images(monitor: Monitor, display_contexts: Vec<DisplayContex
             )
             .unwrap();
 
-        println!("Frame {} saved!", i);
+        let frame_path = format!("output-bmps/output-bmp-{}.bmp", i);
+
+        let frame_path = CString::new(frame_path).unwrap();
+
+        let combined_image = ImlibLoadImage(frame_path.as_ptr() as *const i8);
+
+        combined_images_loaded.push(combined_image);
+
+        info!("Frame {} done!", i);
     }
 
     std::fs::remove_dir_all("temp-bmps").expect("Failed to remove temporary bitmap directory!");
+
+    combined_images_loaded
 }
 
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
@@ -176,18 +198,21 @@ pub unsafe fn render(
     monitor: Monitor,
     display_contexts: Vec<DisplayContext>,
 ) {
-    composite_images(monitor, display_contexts);
+    let images = composite_images(monitor, display_contexts);
 
-    // loop {
-    //     let current_index = cycle % num_elements;
+    let num_elements = images.len();
+    let mut cycle = 0;
 
-    //     run(display, monitor, current_info.clone());
-    //     cycle += 1;
+    loop {
+        let current_index = cycle % num_elements;
 
-    //     let timeout = Duration::from_nanos(
-    //         (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
-    //     );
+        run(display, monitor, images[current_index]);
+        cycle += 1;
 
-    //     std::thread::sleep(timeout);
-    // }
+        let timeout = Duration::from_nanos(
+            (MICROSECONDS_PER_SECOND / 60) * 1_000, // nanoseconds
+        );
+
+        std::thread::sleep(timeout);
+    }
 }

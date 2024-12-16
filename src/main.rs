@@ -4,7 +4,7 @@ use clap::Parser;
 use env_logger::Env;
 use imlib_rs::{
     ImlibContextPush, ImlibContextSetBlend, ImlibContextSetDither, ImlibContextSetImage,
-    ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImageGetHeight,
+    ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage, ImlibImageGetHeight,
     ImlibImageGetWidth, ImlibLoadImage, ImlibRenderImageOnDrawable,
 };
 use log::info;
@@ -28,11 +28,11 @@ struct CliArgs {
     bg: Vec<String>,
 }
 
-unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: DisplayContext) {
+pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: ImlibImage) {
     ImlibContextPush(monitor.render_context);
     ImlibContextSetDither(1);
     ImlibContextSetBlend(1);
-    ImlibContextSetImage(background_info.current_image);
+    ImlibContextSetImage(background_image);
 
     let original_width = ImlibImageGetWidth();
     let original_height = ImlibImageGetHeight();
@@ -42,12 +42,12 @@ unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: Displa
         0,
         original_width,
         original_height,
-        background_info.width as i32,
-        background_info.height as i32,
+        monitor.width as i32,
+        monitor.height as i32,
     );
 
     ImlibContextSetImage(scaled_image);
-    ImlibRenderImageOnDrawable(background_info.x, background_info.y);
+    ImlibRenderImageOnDrawable(0, 0);
 
     set_root_atoms(display, monitor);
 

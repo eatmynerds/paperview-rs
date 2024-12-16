@@ -3,7 +3,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use imlib_rs::ImlibImage;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ImageData {
     pub image_path: String,
     pub image_size: (i32, i32),
