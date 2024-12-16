@@ -135,8 +135,8 @@ unsafe fn composite_images(
                 0,
                 image_width,
                 image_height,
-                monitor.width as i32 / frame_combo.len() as i32,
-                monitor.height as i32,
+                display_contexts[i].width as i32,
+                display_contexts[i].height as i32,
             );
 
             ImlibContextSetImage(scaled_image);
@@ -146,8 +146,9 @@ unsafe fn composite_images(
 
             let temp_image_data = std::slice::from_raw_parts(
                 imlib_image_get_data(),
-                (monitor.width / frame_combo.len() as u32 * monitor.height) as usize,
+                (display_contexts[i].width * display_contexts[i].height) as usize,
             );
+
             combine_images(
                 i,
                 (display_contexts[i].x, display_contexts[i].y),
