@@ -1,11 +1,15 @@
+// #![feature(test)]
 use std::{
     ffi::{c_void, CString},
     ops::DerefMut,
 };
 
-use image::{Rgba, RgbaImage};
+use image::ImageBuffer;
+use image::{DynamicImage, GenericImage, GenericImageView, Rgba, RgbaImage};
 use imlib_rs::{
-    ImlibContextPush, ImlibContextSetImage, ImlibFreeImageAndDecache, ImlibImage, ImlibLoadImage,
+    imlib_create_image, imlib_image_get_data, imlib_image_get_height, imlib_image_get_width,
+    imlib_image_put_back_data, ImlibContextPush, ImlibContextSetImage,
+    ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage, ImlibLoadImage,
     ImlibSaveImage,
 };
 use log::info;
@@ -16,34 +20,43 @@ use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay,
 
 use crate::{run, DisplayContext, ImageData, Monitor, MICROSECONDS_PER_SECOND};
 
-fn combine_images(image_data: Vec<ImageData>, canvas_width: u32, canvas_height: u32) -> RgbaImage {
-    let canvas = Mutex::new(RgbaImage::from_pixel(
-        canvas_width,
-        canvas_height,
-        Rgba([0, 0, 0, 0]),
-    ));
+fn combine_images(
+    index: usize,
+    image_position: (i32, i32),
+    image_size: (i32, i32),
+    monitor: &Monitor,
+    canvas: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    image_data: &[u32],
+) {
+    let updated_image_data = image_data
+        .iter()
+        .flat_map(|data| {
+            vec![
+                ((data >> 16) & 0xFF) as u8,
+                ((data >> 8) & 0xFF) as u8,
+                (data & 0xFF) as u8,
+                ((data >> 24) & 0xFF) as u8,
+            ]
+        })
+        .collect::<Vec<u8>>();
 
-    image_data.into_par_iter().for_each(|info| {
-        let img = image::open(&info.image_path).unwrap().into_rgba8();
+    let new_layer =
+        ImageBuffer::from_raw(image_size.0 as u32, image_size.1 as u32, updated_image_data)
+            .unwrap();
 
-        let resized_image = image::imageops::resize(
-            &img,
-            info.image_size.0 as u32,
-            info.image_size.1 as u32,
-            image::imageops::FilterType::Nearest,
-        );
+    let resized_layer = image::imageops::resize(
+        &new_layer,
+        image_size.0 as u32,
+        image_size.1 as u32,
+        image::imageops::FilterType::Nearest,
+    );
 
-        let mut canvas = canvas.lock().unwrap();
-
-        image::imageops::overlay(
-            canvas.deref_mut(),
-            &resized_image,
-            info.image_position.0 as i64,
-            info.image_position.1 as i64,
-        );
-    });
-
-    canvas.into_inner().unwrap()
+    image::imageops::overlay(
+        canvas,
+        &resized_layer,
+        image_position.0 as i64,
+        image_position.1 as i64,
+    );
 }
 
 unsafe fn composite_images(
@@ -51,7 +64,6 @@ unsafe fn composite_images(
     display_contexts: Vec<DisplayContext>,
 ) -> Vec<ImlibImage> {
     info!("Creating bitmap output directory");
-    std::fs::create_dir("temp-bmps").expect("Failed to create temporary bitmap directory!");
 
     if !std::fs::read_dir("output-bmps").is_ok() {
         std::fs::create_dir("output-bmps").expect("Failed to remove output bitmap directory!");
@@ -93,7 +105,6 @@ unsafe fn composite_images(
 
         all_frame_combos.push(frame_combo.clone());
 
-        // Check if the current combo matches the maximum frame numbers
         if frame_combo
             .iter()
             .zip(&max_frames)
@@ -103,64 +114,67 @@ unsafe fn composite_images(
         }
     }
 
-    let mut combined_images_loaded = vec![];
+    let mut output_frames = vec![];
 
     for (i, frame_combo) in all_frame_combos.iter().enumerate() {
-        let mut combined_frame_paths = vec![];
+        let mut canvas = RgbaImage::from_pixel(
+            monitor.width as u32,
+            monitor.height as u32,
+            Rgba([0, 0, 0, 0]),
+        );
 
-        for (i, frame) in frame_combo.iter().enumerate() {
+        for (i, frame) in frame_combo.iter().enumerate().rev() {
             let current_image = display_contexts[i].images[*frame];
 
             ImlibContextSetImage(current_image);
 
-            let image_path_str = CString::new(format!("temp-bmps/temp-bitmap-{}-{}.bmp", i, frame))
-                .expect("Failed to convert filename to c-string!");
+            let image_height = imlib_image_get_height();
+            let image_width = imlib_image_get_width();
 
-            ImlibSaveImage(image_path_str.as_ptr() as *const i8);
+            let scaled_image = ImlibCreateCroppedScaledImage(
+                0,
+                0,
+                image_width,
+                image_height,
+                monitor.width as i32,
+                monitor.height as i32,
+            );
 
-            let temp_bitmap =
-                std::fs::canonicalize(format!("temp-bmps/temp-bitmap-{}-{}.bmp", i, frame))
-                    .unwrap();
+            ImlibContextSetImage(scaled_image);
 
-            let current_frame_path = temp_bitmap
-                .to_str()
-                .expect("Failed to convert to string!")
-                .to_string();
+            let temp_image_data = std::slice::from_raw_parts(
+                imlib_image_get_data(),
+                (monitor.width * monitor.height) as usize,
+            );
 
-            combined_frame_paths.push(ImageData {
-                image_path: current_frame_path,
-                image_size: (display_contexts[i].width, display_contexts[i].height),
-                image_position: (display_contexts[i].x, display_contexts[i].y),
-            });
+            combine_images(
+                i,
+                (display_contexts[i].x, display_contexts[i].y),
+                (monitor.width as i32, monitor.height as i32),
+                &monitor,
+                &mut canvas,
+                temp_image_data,
+            );
         }
 
-        let combined_frames = combine_images(
-            combined_frame_paths,
-            monitor.width as u32,
-            monitor.height as u32,
-        );
+        println!("Frame {} done!", i);
 
-        combined_frames
+        canvas
             .save_with_format(
                 format!("output-bmps/output-bmp-{}.bmp", i),
                 image::ImageFormat::Bmp,
             )
             .unwrap();
 
-        let frame_path = format!("output-bmps/output-bmp-{}.bmp", i);
-
-        let frame_path = CString::new(frame_path).unwrap();
-
-        let combined_image = ImlibLoadImage(frame_path.as_ptr() as *const i8);
-
-        combined_images_loaded.push(combined_image);
-
-        info!("Frame {} done!", i);
+        output_frames.push(ImlibLoadImage(
+            CString::new(format!("output-bmps/output-bmp-{}.bmp", i))
+                .unwrap()
+                .as_ptr() as *const i8,
+        ));
     }
 
     std::fs::remove_dir_all("temp-bmps").expect("Failed to remove temporary bitmap directory!");
-
-    combined_images_loaded
+    output_frames
 }
 
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
