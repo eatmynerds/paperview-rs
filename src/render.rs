@@ -109,8 +109,8 @@ unsafe fn composite_images(
 
             ImlibContextSetImage(current_image);
 
-            let image_height = imlib_image_get_height();
-            let image_width = imlib_image_get_width();
+            let image_height = ImlibImageGetHeight();
+            let image_width = ImlibImageGetWidth();
 
             let scaled_image = ImlibCreateCroppedScaledImage(
                 0,
