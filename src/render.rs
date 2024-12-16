@@ -1,4 +1,3 @@
-// #![feature(test)]
 use std::{
     ffi::{c_void, CString},
     ops::DerefMut,
@@ -136,7 +135,7 @@ unsafe fn composite_images(
                 0,
                 image_width,
                 image_height,
-                monitor.width as i32,
+                monitor.width as i32 / frame_combo.len() as i32,
                 monitor.height as i32,
             );
 
@@ -147,9 +146,8 @@ unsafe fn composite_images(
 
             let temp_image_data = std::slice::from_raw_parts(
                 imlib_image_get_data(),
-                (monitor.width * monitor.height) as usize,
+                (monitor.width / frame_combo.len() as u32 * monitor.height) as usize,
             );
-
             combine_images(
                 i,
                 (display_contexts[i].x, display_contexts[i].y),
@@ -176,7 +174,6 @@ unsafe fn composite_images(
         ));
     }
 
-    std::fs::remove_dir_all("temp-bmps").expect("Failed to remove temporary bitmap directory!");
     output_frames
 }
 
