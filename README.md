@@ -37,14 +37,14 @@ Clone the repository:
 
 paperview-rs can handle a single monitor like so:
 ```bash
-    ./paperview-rs --path FOLDER 
+    ./paperview-rs --bg "<monitor width>:<monitor height>:<monitor x position>:<monitor y position>:<bitmap-directory>:<fps>"
 ```
 
 ## Multi Monitor Use
 
 paperview-rs can handle any number of monitors. Each monitor will render wallpapers independently.
 ```bash
-    ./paperview-rs --path FOLDER 
+    ./paperview-rs --bg "<monitor width>:<monitor height>:<monitor x position>:<monitor y position>:<bitmap-directory>:<fps>" --bg "<monitor width>:<monitor height>:<montior x position>:<monitor y position>:<bitmap-directory>:<fps>"
 ```
 
 
@@ -52,7 +52,7 @@ paperview-rs can handle any number of monitors. Each monitor will render wallpap
 
 Run paperview-rs in the backgrond using `&`:
 ```bash
-    ./paperview-rs --path FOLDER &
+    ./paperview-rs --bg "<montior width>:<monitor height>:<monitor x position>:<monitor y position>:<bitmap-directory>:<fps>" &
 ```
 
 To terminate the background process:
@@ -81,7 +81,7 @@ or simply execute it after X11 is running:
     while true
     do
         scene=$(ls -d ~/scenes/*/ | shuf -n 1)
-        timeout 600 paperview-rs --path $scene 
+        timeout 600 ./paperview-rs --bg "<monitor width>:<monitor height>:<monitor x position>:<montior y position>:$scene:<fps>"
     done
 ```
 
