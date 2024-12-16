@@ -1,0 +1,5 @@
+group_imports = "StdExternalCrate"
+imports_granularity="Crate"
+newline_style = "Auto"
+max_width = 100
+

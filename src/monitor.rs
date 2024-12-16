@@ -1,7 +1,7 @@
 use imlib_rs::{
-    imlib_context_new, imlib_context_pop, imlib_context_push, imlib_context_set_color_range,
-    imlib_context_set_colormap, imlib_context_set_display, imlib_context_set_drawable,
-    imlib_context_set_visual, imlib_create_color_range, Imlib_Context,
+    ImlibContext, ImlibContextNew, ImlibContextPop, ImlibContextPush, ImlibContextSetColorRange,
+    ImlibContextSetColormap, ImlibContextSetDisplay, ImlibContextSetDrawable,
+    ImlibContextSetVisual, ImlibCreateColorRange,
 };
 use log::info;
 use x11::xlib::{
@@ -15,7 +15,7 @@ pub struct Monitor {
     pub pixmap: Pixmap,
     pub width: u32,
     pub height: u32,
-    pub render_context: Imlib_Context,
+    pub render_context: ImlibContext,
 }
 
 struct Cast<A, B>((A, B));
@@ -69,16 +69,16 @@ pub unsafe fn get_monitors() -> (*mut _XDisplay, Vec<Monitor>) {
             pixmap,
             width: width as u32,
             height: height as u32,
-            render_context: imlib_context_new(),
+            render_context: ImlibContextNew(),
         });
 
-        imlib_context_push(monitors[current_screen as usize].render_context);
-        imlib_context_set_display(display.cast());
-        imlib_context_set_visual(Cast::safe_ptr_cast(visual));
-        imlib_context_set_colormap(cm);
-        imlib_context_set_drawable(pixmap);
-        imlib_context_set_color_range(imlib_create_color_range());
-        imlib_context_pop();
+        ImlibContextPush(monitors[current_screen as usize].render_context);
+        ImlibContextSetDisplay(display.cast());
+        ImlibContextSetVisual(Cast::safe_ptr_cast(visual));
+        ImlibContextSetColormap(cm);
+        ImlibContextSetDrawable(pixmap);
+        ImlibContextSetColorRange(ImlibCreateColorRange());
+        ImlibContextPop();
     }
 
     info!("Loaded {} screens", screen_count);

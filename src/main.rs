@@ -1,18 +1,17 @@
+use std::{ffi::CString, fs, path::Path, str::FromStr};
+
+use clap::Parser;
+use env_logger::Env;
 use imlib_rs::{
-    imlib_context_push, imlib_context_set_blend, imlib_context_set_dither, imlib_context_set_image,
-    imlib_create_cropped_scaled_image, imlib_free_image_and_decache, imlib_image_get_height,
-    imlib_image_get_width, imlib_load_image, imlib_render_image_on_drawable,
+    ImlibContextPush, ImlibContextSetBlend, ImlibContextSetDither, ImlibContextSetImage,
+    ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImageGetHeight,
+    ImlibImageGetWidth, ImlibLoadImage, ImlibRenderImageOnDrawable,
 };
+use log::info;
 use x11::xlib::{
     AllTemporary, False, RetainTemporary, XClearWindow, XFlush, XKillClient, XSetCloseDownMode,
     XSetWindowBackgroundPixmap, XSync, _XDisplay,
 };
-
-use clap::Parser;
-use env_logger::Env;
-use log::info;
-use std::str::FromStr;
-use std::{ffi::CString, fs, path::Path};
 
 mod models;
 use models::{DisplayContext, ImageData};
@@ -30,15 +29,15 @@ struct CliArgs {
 }
 
 unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: DisplayContext) {
-    imlib_context_push(monitor.render_context);
-    imlib_context_set_dither(1);
-    imlib_context_set_blend(1);
-    imlib_context_set_image(background_info.current_image);
+    ImlibContextPush(monitor.render_context);
+    ImlibContextSetDither(1);
+    ImlibContextSetBlend(1);
+    ImlibContextSetImage(background_info.current_image);
 
-    let original_width = imlib_image_get_width();
-    let original_height = imlib_image_get_height();
+    let original_width = ImlibImageGetWidth();
+    let original_height = ImlibImageGetHeight();
 
-    let scaled_image = imlib_create_cropped_scaled_image(
+    let scaled_image = ImlibCreateCroppedScaledImage(
         0,
         0,
         original_width,
@@ -47,8 +46,8 @@ unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: Displa
         background_info.height as i32,
     );
 
-    imlib_context_set_image(scaled_image);
-    imlib_render_image_on_drawable(background_info.x, background_info.y);
+    ImlibContextSetImage(scaled_image);
+    ImlibRenderImageOnDrawable(background_info.x, background_info.y);
 
     set_root_atoms(display, monitor);
 
@@ -59,7 +58,7 @@ unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_info: Displa
     XFlush(display);
     XSync(display, False);
 
-    imlib_free_image_and_decache();
+    ImlibFreeImageAndDecache();
 }
 
 fn main() {
@@ -70,9 +69,10 @@ fn main() {
     let mut display_contexts: Vec<DisplayContext> = vec![];
 
     for background in args.bg {
-        let mut bg: DisplayContext = DisplayContext::from_str(background.as_str()).unwrap();
+        let mut display_context: DisplayContext =
+            DisplayContext::from_str(background.as_str()).unwrap();
 
-        let image_dir = Path::new(&bg.image_path);
+        let image_dir = Path::new(&display_context.bitmap_dir);
 
         let images_count = fs::read_dir(image_dir)
             .expect("Failed to open bitmap directory")
@@ -83,12 +83,12 @@ fn main() {
 
             unsafe {
                 let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
-                let image = imlib_load_image(image_path_c_str.as_ptr() as *const i8);
-                bg.images.push(image);
+                let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
+                display_context.images.push(image);
             }
         }
 
-        display_contexts.push(bg);
+        display_contexts.push(display_context);
     }
 
     unsafe {

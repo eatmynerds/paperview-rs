@@ -1,17 +1,22 @@
-use crate::{DisplayContext, ImageData, Monitor};
+use std::{ffi::CString, ops::DerefMut};
+
 use image::{Rgba, RgbaImage};
-use imlib_rs::{imlib_context_push, imlib_context_set_image, imlib_save_image};
-use std::ffi::CString;
+use imlib_rs::{ImlibContextPush, ImlibContextSetImage, ImlibSaveImage};
+use log::info;
+use rayon::prelude::*;
+use std::sync::Mutex;
 use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
 
-fn combine_images_with_blank(
-    image_data: Vec<ImageData>,
-    canvas_width: u32,
-    canvas_height: u32,
-) -> RgbaImage {
-    let mut canvas = RgbaImage::from_pixel(canvas_width, canvas_height, Rgba([0, 0, 0, 0]));
+use crate::{DisplayContext, ImageData, Monitor};
 
-    for info in image_data {
+fn combine_images(image_data: Vec<ImageData>, canvas_width: u32, canvas_height: u32) -> RgbaImage {
+    let canvas = Mutex::new(RgbaImage::from_pixel(
+        canvas_width,
+        canvas_height,
+        Rgba([0, 0, 0, 0]),
+    ));
+
+    image_data.into_par_iter().for_each(|info| {
         let img = image::open(&info.image_path).unwrap().into_rgba8();
 
         let resized_image = image::imageops::resize(
@@ -21,15 +26,119 @@ fn combine_images_with_blank(
             image::imageops::FilterType::Nearest,
         );
 
+        let mut canvas = canvas.lock().unwrap();
+
         image::imageops::overlay(
-            &mut canvas,
+            canvas.deref_mut(),
             &resized_image,
             info.image_position.0 as i64,
             info.image_position.1 as i64,
         );
+    });
+
+    canvas.into_inner().unwrap()
+}
+
+unsafe fn composite_images(monitor: Monitor, display_contexts: Vec<DisplayContext>) {
+    info!("Creating bitmap output directory");
+    std::fs::create_dir("temp-bmps").expect("Failed to create temporary bitmap directory!");
+
+    if !std::fs::read_dir("output-bmps").is_ok() {
+        std::fs::create_dir("output-bmps").expect("Failed to remove output bitmap directory!");
+    } else {
+        std::fs::remove_dir_all("output-bmps").expect("Failed to create output bitmap directory!");
     }
 
-    canvas
+    info!("Compositing bitmap images");
+    ImlibContextPush(monitor.render_context);
+
+    let num_elements = display_contexts.len();
+
+    let mut current_info = display_contexts
+        .iter()
+        .map(|context| (0..context.images.len()).cycle())
+        .collect::<Vec<_>>();
+
+    let max_frames: Vec<_> = display_contexts
+        .iter()
+        .map(|context| context.images.len() - 1)
+        .collect();
+
+    // A loop that will iterate through all the possible frame combinations
+    // wizardable-bmp: [0.bmp 1.bmp]
+    // cyberpunk-bmp: [0.bmp 1.bmp 2.bmp, 3.bmp]
+    //
+    // 0.bmp + 0.bmp -> output.bmp
+    // 1.bmp + 1.bmp -> output.bmp
+    // 2.bmp + 0.bmp -> output.bmp
+    // 3.bmp + 1.bmp -> output.bmp
+    // ....
+    let mut all_frame_combos: Vec<Vec<usize>> = vec![];
+
+    loop {
+        let frame_combo = current_info
+            .iter_mut()
+            .map(|context| context.next().unwrap())
+            .collect::<Vec<_>>();
+
+        all_frame_combos.push(frame_combo.clone());
+
+        // Check if the current combo matches the maximum frame numbers
+        if frame_combo
+            .iter()
+            .zip(&max_frames)
+            .all(|(frame, &max)| *frame == max)
+        {
+            break;
+        }
+    }
+
+    for (i, frame_combo) in all_frame_combos.iter().enumerate() {
+        let mut combined_frame_paths = vec![];
+
+        for (i, frame) in frame_combo.iter().enumerate() {
+            let current_image = display_contexts[i].images[*frame];
+
+            ImlibContextSetImage(current_image);
+
+            let image_path_str = CString::new(format!("temp-bmps/temp-bitmap-{}-{}.bmp", i, frame))
+                .expect("Failed to convert filename to c-string!");
+
+            ImlibSaveImage(image_path_str.as_ptr() as *const i8);
+
+            let temp_bitmap =
+                std::fs::canonicalize(format!("temp-bmps/temp-bitmap-{}-{}.bmp", i, frame))
+                    .unwrap();
+
+            let current_frame_path = temp_bitmap
+                .to_str()
+                .expect("Failed to convert to string!")
+                .to_string();
+
+            combined_frame_paths.push(ImageData {
+                image_path: current_frame_path,
+                image_size: (display_contexts[i].width, display_contexts[i].height),
+                image_position: (display_contexts[i].x, display_contexts[i].y),
+            });
+        }
+
+        let combined_frames = combine_images(
+            combined_frame_paths,
+            monitor.width as u32,
+            monitor.height as u32,
+        );
+
+        combined_frames
+            .save_with_format(
+                format!("output-bmps/output-bmp-{}.bmp", i),
+                image::ImageFormat::Bmp,
+            )
+            .unwrap();
+
+        println!("Frame {} saved!", i);
+    }
+
+    std::fs::remove_dir_all("temp-bmps").expect("Failed to remove temporary bitmap directory!");
 }
 
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
@@ -65,63 +174,20 @@ pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
 pub unsafe fn render(
     display: *mut _XDisplay,
     monitor: Monitor,
-    mut display_context: Vec<DisplayContext>,
+    display_contexts: Vec<DisplayContext>,
 ) {
-    let num_elements = display_context.len();
-
-    imlib_context_push(monitor.render_context);
-
-    let mut cycle = 0;
-
-    loop {
-        let mut image_data: Vec<ImageData> = vec![];
-
-        for element in 0..num_elements {
-            let current_info = &mut display_context[element];
-            current_info.current_image = current_info.images[cycle % current_info.images.len()];
-
-            imlib_context_set_image(current_info.current_image);
-
-            let image_path_str = CString::new(format!("temp-bitmap-{}.bmp", element))
-                .expect("Failed to convert filename to c-string!");
-
-            imlib_save_image(image_path_str.as_ptr() as *const i8);
-
-            let temp_bitmap =
-                std::fs::canonicalize(format!("temp-bitmap-{}.bmp", element)).unwrap();
-
-            let current_image_path = temp_bitmap.to_str().expect("Failed to convert to string!");
-
-            image_data.push(ImageData {
-                image_path: current_image_path.to_string(),
-                image_size: (current_info.width, current_info.height),
-                image_position: (current_info.x, current_info.y),
-            });
-        }
-
-        let combined_images = combine_images_with_blank(image_data, monitor.width, monitor.height);
-
-        combined_images
-            .save_with_format("output.bmp", image::ImageFormat::Bmp)
-            .unwrap();
-
-        println!("done combining images!");
-
-        cycle += 1;
-    }
+    composite_images(monitor, display_contexts);
 
     // loop {
     //     let current_index = cycle % num_elements;
 
-    //     println!("{:#?}", image_data);
+    //     run(display, monitor, current_info.clone());
+    //     cycle += 1;
 
-    //     // run(display, monitor, current_info.clone());
-    //     // cycle += 1;
+    //     let timeout = Duration::from_nanos(
+    //         (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
+    //     );
 
-    //     // let timeout = Duration::from_nanos(
-    //     //     (MICROSECONDS_PER_SECOND / current_info.fps as u64) * 1_000, // nanoseconds
-    //     // );
-
-    //     // std::thread::sleep(timeout);
+    //     std::thread::sleep(timeout);
     // }
 }

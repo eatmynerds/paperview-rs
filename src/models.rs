@@ -1,6 +1,7 @@
-use anyhow::anyhow;
-use imlib_rs::Imlib_Image;
 use std::str::FromStr;
+
+use anyhow::anyhow;
+use imlib_rs::ImlibImage;
 
 #[derive(Debug)]
 pub struct ImageData {
@@ -15,10 +16,10 @@ pub struct DisplayContext {
     pub height: i32,
     pub x: i32,
     pub y: i32,
-    pub image_path: String,
+    pub bitmap_dir: String,
     pub fps: f32,
-    pub current_image: Imlib_Image,
-    pub images: Vec<Imlib_Image>,
+    pub current_image: ImlibImage,
+    pub images: Vec<ImlibImage>,
 }
 
 impl FromStr for DisplayContext {
@@ -47,7 +48,7 @@ impl FromStr for DisplayContext {
             .ok_or_else(|| anyhow!("Failed to parse y!"))?
             .parse()?;
 
-        let image_path: String = chars
+        let bitmap_dir: String = chars
             .next()
             .ok_or_else(|| anyhow!("Failed to parse image path!"))?
             .parse()?;
@@ -63,7 +64,7 @@ impl FromStr for DisplayContext {
             x,
             y,
             fps,
-            image_path: image_path.to_string(),
+            bitmap_dir,
             current_image: std::ptr::null_mut(),
             images: vec![],
         })
