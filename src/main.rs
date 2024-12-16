@@ -14,7 +14,7 @@ use x11::xlib::{
 };
 
 mod models;
-use models::{DisplayContext, ImageData};
+use models::DisplayContext;
 mod render;
 use render::{render, set_root_atoms};
 mod monitor;

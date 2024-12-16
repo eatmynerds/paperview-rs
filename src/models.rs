@@ -4,13 +4,6 @@ use anyhow::anyhow;
 use imlib_rs::ImlibImage;
 
 #[derive(Clone, Debug)]
-pub struct ImageData {
-    pub image_path: String,
-    pub image_size: (i32, i32),
-    pub image_position: (i32, i32),
-}
-
-#[derive(Clone, Debug)]
 pub struct DisplayContext {
     pub width: i32,
     pub height: i32,
@@ -18,7 +11,6 @@ pub struct DisplayContext {
     pub y: i32,
     pub bitmap_dir: String,
     pub fps: f32,
-    pub current_image: ImlibImage,
     pub images: Vec<ImlibImage>,
 }
 
@@ -65,7 +57,6 @@ impl FromStr for DisplayContext {
             y,
             fps,
             bitmap_dir,
-            current_image: std::ptr::null_mut(),
             images: vec![],
         })
     }

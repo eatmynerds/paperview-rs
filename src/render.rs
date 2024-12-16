@@ -1,36 +1,28 @@
-use std::{
-    ffi::{c_void, CString},
-    ops::DerefMut,
-};
+use std::ffi::CString;
 
 use image::ImageBuffer;
-use image::{DynamicImage, GenericImage, GenericImageView, Rgba, RgbaImage};
+use image::{Rgba, RgbaImage};
 use imlib_rs::{
-    imlib_create_image, imlib_image_get_data, imlib_image_get_height, imlib_image_get_width,
-    imlib_image_put_back_data, ImlibContextPush, ImlibContextSetImage,
-    ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage, ImlibLoadImage,
-    ImlibSaveImage,
+    imlib_image_get_data, imlib_image_get_height, imlib_image_get_width, ImlibContextPush,
+    ImlibContextSetImage, ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage,
+    ImlibLoadImage,
 };
 use log::info;
-use rayon::prelude::*;
-use std::sync::Mutex;
 use std::time::Duration;
 use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
 
-use crate::{run, DisplayContext, ImageData, Monitor, MICROSECONDS_PER_SECOND};
+use crate::{run, DisplayContext, Monitor, MICROSECONDS_PER_SECOND};
 
 fn combine_images(
-    index: usize,
     image_position: (i32, i32),
     image_size: (i32, i32),
-    monitor: &Monitor,
     canvas: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     image_data: &[u32],
 ) {
     let updated_image_data = image_data
         .iter()
         .flat_map(|data| {
-            vec![
+            [
                 ((data >> 16) & 0xFF) as u8,
                 ((data >> 8) & 0xFF) as u8,
                 (data & 0xFF) as u8,
@@ -64,21 +56,14 @@ unsafe fn composite_images(
 ) -> Vec<ImlibImage> {
     info!("Creating bitmap output directory");
 
-    if !std::fs::read_dir("output-bmps").is_ok() {
-        std::fs::create_dir("output-bmps").expect("Failed to remove output bitmap directory!");
-    } else {
+    if std::fs::exists("output-bmps").expect("Failed to check if output bitmap directory exists!") {
         std::fs::remove_dir_all("output-bmps").expect("Failed to create output bitmap directory!");
     }
 
+    std::fs::create_dir("output-bmps").expect("Failed to remove output bitmap directory!");
+
     info!("Compositing bitmap images");
     ImlibContextPush(monitor.render_context);
-
-    let num_elements = display_contexts.len();
-
-    let mut current_info = display_contexts
-        .iter()
-        .map(|context| (0..context.images.len()).cycle())
-        .collect::<Vec<_>>();
 
     // A loop that will iterate through all the possible frame combinations
     // wizardable-bmp: [0.bmp 1.bmp] - 60
@@ -89,10 +74,9 @@ unsafe fn composite_images(
     // 2.bmp + 0.bmp -> output.bmp
     // 3.bmp + 1.bmp -> output.bmp
     // ....
-
     let max_length = display_contexts
         .iter()
-        .map(|context| context.images.len() as f32 * context.fps)
+        .map(|context| context.images.len() as f32 / context.fps)
         .max_by(f32::total_cmp)
         .unwrap();
 
@@ -104,16 +88,12 @@ unsafe fn composite_images(
 
     let output_frames = (max_length * output_fps) as usize;
 
-
     let all_frame_combos = (0..output_frames).map(|frame| {
         display_contexts
             .iter()
             .map(|ctx| (frame as f32 * ctx.fps / output_fps) as usize % ctx.images.len())
             .collect::<Vec<_>>()
     });
-
-
-    println!("{:#?}", all_frame_combos.len());
 
     let mut output_frames = vec![];
 
@@ -152,16 +132,14 @@ unsafe fn composite_images(
             );
 
             combine_images(
-                i,
                 (display_contexts[i].x, display_contexts[i].y),
                 (updated_image_width, updated_image_height),
-                &monitor,
                 &mut canvas,
                 temp_image_data,
             );
         }
 
-        println!("Frame {} done!", i);
+        info!("Frame {} done!", i);
 
         canvas
             .save_with_format(
@@ -170,11 +148,11 @@ unsafe fn composite_images(
             )
             .unwrap();
 
-        output_frames.push(ImlibLoadImage(
-            CString::new(format!("output-bmps/output-bmp-{}.bmp", i))
-                .unwrap()
-                .as_ptr() as *const i8,
-        ));
+        let image_path_c_str = CString::new(format!("output-bmps/output-bmp-{}.bmp", i)).unwrap();
+
+        output_frames.push(ImlibLoadImage(image_path_c_str.as_ptr() as *const i8));
+
+        ImlibFreeImageAndDecache();
     }
 
     output_frames
