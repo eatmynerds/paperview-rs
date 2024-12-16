@@ -3,7 +3,7 @@ use std::ffi::CString;
 use image::ImageBuffer;
 use image::{Rgba, RgbaImage};
 use imlib_rs::{
-    imlib_image_get_data, imlib_image_get_height, imlib_image_get_width, ImlibContextPush,
+    ImlibImageGetData, ImlibImageGetHeight, ImlibImageGetWidth, ImlibContextPush,
     ImlibContextSetImage, ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage,
     ImlibLoadImage,
 };
@@ -123,11 +123,11 @@ unsafe fn composite_images(
 
             ImlibContextSetImage(scaled_image);
 
-            let updated_image_height = imlib_image_get_height();
-            let updated_image_width = imlib_image_get_width();
+            let updated_image_height = ImlibImageGetHeight();
+            let updated_image_width = ImlibImageGetWidth();
 
             let temp_image_data = std::slice::from_raw_parts(
-                imlib_image_get_data(),
+                ImlibImageGetData(),
                 (display_contexts[i].width * display_contexts[i].height) as usize,
             );
 
