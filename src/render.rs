@@ -104,12 +104,16 @@ unsafe fn composite_images(
 
     let output_frames = (max_length * output_fps) as usize;
 
+
     let all_frame_combos = (0..output_frames).map(|frame| {
         display_contexts
             .iter()
             .map(|ctx| (frame as f32 * ctx.fps / output_fps) as usize % ctx.images.len())
             .collect::<Vec<_>>()
     });
+
+
+    println!("{:#?}", all_frame_combos.len());
 
     let mut output_frames = vec![];
 
