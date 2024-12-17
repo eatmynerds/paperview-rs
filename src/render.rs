@@ -55,7 +55,7 @@ unsafe fn composite_images(
     info!("Creating bitmap output directory");
 
     if std::fs::exists("output-bmps").expect("Failed to check if output bitmap directory exists!") {
-        std::fs::remove_dir_all("output-bmps").expect("Failed to remove output bitmap directory!");
+        std::fs::remove_dir_all("output-bmps").expect("Failed to remove old output bitmap directory!");
     }
 
     std::fs::create_dir("output-bmps").expect("Failed to create output bitmap directory!");
