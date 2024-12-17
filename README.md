@@ -19,6 +19,8 @@ Paperview rewrite in rust with compositor support
 
 ## Prerequisites
 - [ImLib2.h](https://github.com/lluixhi/imlib2/tree/master)
+- [LibXrandr](https://www.x.org/wiki/libraries/libxrandr/)
+- [Clang](https://clang.llvm.org/)
 - [Cargo](https://www.rust-lang.org/tools/install)
 
 ## Quick Start
