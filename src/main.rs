@@ -1,5 +1,6 @@
-use std::{ffi::CString, fs, path::Path, str::FromStr};
+use std::{ffi::CString, str::FromStr};
 
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use env_logger::Env;
 use imlib_rs::{
@@ -19,6 +20,8 @@ mod render;
 use render::{render, set_root_atoms};
 mod monitor;
 use monitor::{get_monitors, Monitor};
+mod bitmap;
+use bitmap::{get_expanded_path, sort_bitmaps};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
@@ -61,7 +64,7 @@ pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: I
     ImlibFreeImageAndDecache();
 }
 
-fn main() {
+fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
 
     let args = CliArgs::parse();
@@ -69,22 +72,23 @@ fn main() {
     let mut display_contexts: Vec<DisplayContext> = vec![];
 
     for background in args.bg {
-        let mut display_context: DisplayContext =
-            DisplayContext::from_str(background.as_str()).unwrap();
+        let mut display_context = DisplayContext::from_str(&background)
+            .map_err(|e| anyhow!("Failed to parse background '{}': {}", background, e))?;
 
-        let image_dir = Path::new(&display_context.bitmap_dir);
+        let image_dir = get_expanded_path(&display_context.bitmap_dir);
+        let bmp_files = sort_bitmaps(&image_dir)?;
 
-        let images_count = fs::read_dir(image_dir)
-            .expect("Failed to open bitmap directory")
-            .count();
-
-        for i in 0..images_count {
-            let image_path = image_dir.join(format!("{}-{}.bmp", image_dir.display(), i));
-
+        for bmp_file in bmp_files {
             unsafe {
-                let image_path_c_str = CString::new(image_path.to_str().unwrap()).unwrap();
-                let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
-                display_context.images.push(image);
+                if let Some(image_path_str) = bmp_file.to_str() {
+                    let image_path_c_str = CString::new(image_path_str).map_err(|_| {
+                        anyhow!("Failed to convert path to C string: {}", bmp_file.display())
+                    })?;
+                    let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
+                    display_context.images.push(image);
+                } else {
+                    return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
+                }
             }
         }
 
@@ -102,4 +106,6 @@ fn main() {
             render(display, monitor, display_contexts.clone());
         }
     }
+
+    Ok(())
 }

@@ -65,10 +65,10 @@ To terminate the background process:
 Creating a custom BMP scene folder from a GIF requires imagemagick.
 For example, to create a castle scene folder from a castle.gif:
 ```bash
-    mkdir castle
-    mv castle.gif castle
-    cd castle
-    convert -coalesce castle.gif out.bmp
+    mkdir castle-bmp
+    mv castle.gif castle-bmp
+    cd castle-bmp
+    magick castle.gif -coalesce castle-bmp.bmp
     rm castle.gif
 ```
 
@@ -78,11 +78,13 @@ Assuming a scenes folder containing a number of scene folders is present in the 
 run the following snippet as a background process within .xinitrc before running `startx`,
 or simply execute it after X11 is running:
 ```bash
-    while true
-    do
-        scene=$(ls -d ~/scenes/*/ | shuf -n 1)
-        timeout 600 ./paperview-rs --bg "<monitor width>:<monitor height>:<monitor x position>:<montior y position>:$scene:<fps>"
-    done
+#!/bin/sh
+
+while true; do
+    scene=$(ls -d ~/scenes/*/ | shuf -n 1)
+
+    timeout 600 ./paperview-rs --bg "1920:1080:0:0:${scene}:60"
+done
 ```
 
 
