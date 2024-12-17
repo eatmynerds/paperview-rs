@@ -65,11 +65,7 @@ To terminate the background process:
 Creating a custom BMP scene folder from a GIF requires imagemagick.
 For example, to create a castle scene folder from a castle.gif:
 ```bash
-    mkdir castle-bmp
-    mv castle.gif castle-bmp
-    cd castle-bmp
-    magick castle.gif -coalesce castle-bmp.bmp
-    rm castle.gif
+./convert.sh castle.gif castle-bmp
 ```
 
 ## Random Animated Wallpapers at Startup
@@ -81,7 +77,7 @@ or simply execute it after X11 is running:
 #!/bin/sh
 
 while true; do
-    scene=$(ls -d ~/scenes/*/ | shuf -n 1)
+    scene=$(ls -d $HOME/repos/paperview-rs/scenes/* | shuf -n 1)
 
     timeout 600 ./paperview-rs --bg "1920:1080:0:0:${scene}:60"
 done
