@@ -84,7 +84,9 @@ while true; do
     timeout 600 ./paperview-rs --bg "1920:1080:0:0:${scene}:60"
 done
 ```
-
+# TODO
+- [x] X11 support
+- [ ] Wayland Support
 
 ## License
 Licensed under [MIT](./LICENSE).
