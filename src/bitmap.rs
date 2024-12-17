@@ -1,6 +1,9 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use anyhow::{anyhow, Result};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 pub fn get_expanded_path(input_path: &str) -> PathBuf {
     if input_path.starts_with("~") {

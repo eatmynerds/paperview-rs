@@ -1,14 +1,12 @@
-use std::ffi::CString;
+use std::{ffi::CString, time::Duration};
 
-use image::ImageBuffer;
-use image::{Rgba, RgbaImage};
+use image::{ImageBuffer, Rgba, RgbaImage};
 use imlib_rs::{
-    ImlibImageGetData, ImlibImageGetHeight, ImlibImageGetWidth, ImlibContextPush,
-    ImlibContextSetImage, ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage,
-    ImlibLoadImage,
+    ImlibContextPush, ImlibContextSetImage, ImlibCreateCroppedScaledImage,
+    ImlibFreeImageAndDecache, ImlibImage, ImlibImageGetData, ImlibImageGetHeight,
+    ImlibImageGetWidth, ImlibLoadImage,
 };
 use log::info;
-use std::time::Duration;
 use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
 
 use crate::{run, DisplayContext, Monitor, MICROSECONDS_PER_SECOND};
