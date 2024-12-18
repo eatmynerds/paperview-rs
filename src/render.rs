@@ -5,6 +5,7 @@ use std::{
         Arc,
     },
     time::Duration,
+    ptr
 };
 
 use image::{ImageBuffer, Rgba, RgbaImage};
@@ -16,7 +17,7 @@ use imlib_rs::{
 use log::info;
 use x11::xlib::{
     AnyPropertyType, False, PropModeReplace, True, XChangeProperty, XGetWindowProperty,
-    XInternAtom, XKillClient, _XDisplay, XA_PIXMAP,
+    XInternAtom, XKillClient, _XDisplay, XA_PIXMAP, AllTemporary, XCloseDisplay, XClearWindow, XFlush, XSetWindowBackgroundPixmap, XFreePixmap, XDeleteProperty, XSync, ParentRelative, XFree, Window, Pixmap, Success, Atom
 };
 
 use crate::{run, DisplayContext, Monitor, MICROSECONDS_PER_SECOND};
@@ -158,12 +159,43 @@ unsafe fn composite_images(
     output_frames
 }
 
-unsafe fn clear_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
-    let atom_root = XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, True);
-    let atom_eroot = XInternAtom(display, c"ESETROOT_PMAP_ID".as_ptr() as *const i8, True);
-    if atom_root != 0 && atom_eroot != 0 {
-        todo!();
-    }
+pub unsafe fn clear_root_atoms(display: *mut _XDisplay, monitor: Monitor, pixmap: Pixmap) {
+    let monitor_pixmap = monitor.pixmap as u64;
+
+    XSetWindowBackgroundPixmap(display, monitor.root, 0 as u64); 
+
+    XClearWindow(display, monitor.root);
+    XFlush(display);
+    XSync(display, False);
+}
+
+pub unsafe fn get_current_pixmap(display: *mut _XDisplay, root: Window) -> Pixmap {
+    let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
+
+    let mut actual_type: Atom = 0;
+    let mut actual_format: i32 = 0;
+    let mut nitems: u64 = 0;
+    let mut bytes_after: u64 = 0;
+    let mut prop: *mut u8 = ptr::null_mut();
+
+    let status = XGetWindowProperty(
+        display,
+        root,
+        atom_root,
+        0,
+        1, 
+        False,
+        XA_PIXMAP,
+        &mut actual_type,
+        &mut actual_format,
+        &mut nitems,
+        &mut bytes_after,
+        &mut prop,
+    );
+
+    let pixmap_id = *(prop as *const u64);
+    XFree(prop as *mut _); 
+    pixmap_id as Pixmap
 }
 
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
@@ -206,10 +238,13 @@ pub unsafe fn render(
 
     let num_elements = images.len();
     let mut cycle = 0;
+    let old_background = get_current_pixmap(display, monitor.root);
 
     loop {
+        
+
         if !running.load(Ordering::SeqCst) {
-            clear_root_atoms(display, monitor);
+            clear_root_atoms(display, monitor, old_background);
             break;
         }
 
@@ -219,7 +254,7 @@ pub unsafe fn render(
         cycle += 1;
 
         let timeout = Duration::from_nanos(
-            (MICROSECONDS_PER_SECOND / 60) * 1_000, // nanoseconds
+            (MICROSECONDS_PER_SECOND / 60) * 1_000,
         );
 
         std::thread::sleep(timeout);
