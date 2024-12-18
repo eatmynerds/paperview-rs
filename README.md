@@ -49,6 +49,12 @@ paperview-rs can handle any number of monitors. Each monitor will render wallpap
     ./paperview-rs --bg "<monitor width>:<monitor height>:<monitor x offset>:<monitor y offset>:<bitmap-directory>:<fps>" --bg "<monitor width>:<monitor height>:<montior x offset>:<monitor y offset>:<bitmap-directory>:<fps>"
 ```
 
+# TUI 
+
+If you're just not really a big fan of the command line, fear not! paperview-rs has a built-in TUI. You can use it like so:
+```bash
+    ./paperview-rs --tui
+```
 
 ## Running as a Background Process
 

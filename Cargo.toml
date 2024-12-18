@@ -6,9 +6,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.94"
 clap = { version = "4.5.23", features = ["derive"] }
+color-eyre = "0.6.3"
 dirs = "5.0.1"
 env_logger = "0.11.5"
 image = "0.25.5"
 imlib-rs = { version = "0.1.4", git = "https://github.com/eatmynerds/imlib-rs" }
 log = "0.4.22"
+ratatui = "0.29.0"
+regex = "1.11.1"
 x11 = { version = "2.21.0", features = ["xlib"] }

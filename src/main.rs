@@ -20,13 +20,19 @@ mod render;
 use render::{render, set_root_atoms};
 mod monitor;
 use monitor::{get_monitors, Monitor};
-mod bitmap;
-use bitmap::{get_expanded_path, sort_bitmaps};
+mod tui;
+use tui::{
+    display::App,
+    path::{get_expanded_path, sort_bitmaps},
+    screen::get_screens,
+};
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
 #[derive(Parser, Debug)]
 struct CliArgs {
+    #[arg(long)]
+    tui: bool,
     #[arg(short, long)]
     bg: Vec<String>,
 }
@@ -71,28 +77,74 @@ fn main() -> Result<()> {
 
     let mut display_contexts: Vec<DisplayContext> = vec![];
 
-    for background in args.bg {
-        let mut display_context = DisplayContext::from_str(&background)
-            .map_err(|e| anyhow!("Failed to parse background '{}': {}", background, e))?;
+    if args.tui {
+        let mut screens = get_screens();
 
-        let image_dir = get_expanded_path(&display_context.bitmap_dir);
-        let bmp_files = sort_bitmaps(&image_dir)?;
+        color_eyre::install().unwrap();
+        let terminal = ratatui::init();
+        let options: Vec<String> = screens
+            .iter()
+            .enumerate()
+            .map(|(i, screen)| {
+                format!(
+                    "Screen {} (Dimensions: {}x{}) (Offset: {}, {}) (FPS: {})",
+                    i, screen.width, screen.height, screen.x, screen.y, screen.fps
+                )
+            })
+            .collect();
 
-        for bmp_file in bmp_files {
-            unsafe {
-                if let Some(image_path_str) = bmp_file.to_str() {
-                    let image_path_c_str = CString::new(image_path_str).map_err(|_| {
-                        anyhow!("Failed to convert path to C string: {}", bmp_file.display())
-                    })?;
-                    let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
-                    display_context.images.push(image);
-                } else {
-                    return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
-                }
-            }
+        let app = App::new(options);
+        let paths = app.run(terminal).unwrap();
+        ratatui::restore();
+
+        for (monitor, path) in paths {
+            screens[monitor].bitmap_dir = path;
         }
 
-        display_contexts.push(display_context);
+        for mut screen in screens {
+            let image_dir = get_expanded_path(&screen.bitmap_dir);
+            let bmp_files = sort_bitmaps(&image_dir)?;
+
+            for bmp_file in bmp_files {
+                unsafe {
+                    if let Some(image_path_str) = bmp_file.to_str() {
+                        let image_path_c_str = CString::new(image_path_str).map_err(|_| {
+                            anyhow!("Failed to convert path to C string: {}", bmp_file.display())
+                        })?;
+                        let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
+                        screen.images.push(image);
+                    } else {
+                        return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
+                    }
+                }
+            }
+
+            display_contexts.push(screen);
+        }
+    } else {
+        for background in args.bg {
+            let mut display_context = DisplayContext::from_str(&background)
+                .map_err(|e| anyhow!("Failed to parse background '{}': {}", background, e))?;
+
+            let image_dir = get_expanded_path(&display_context.bitmap_dir);
+            let bmp_files = sort_bitmaps(&image_dir)?;
+
+            for bmp_file in bmp_files {
+                unsafe {
+                    if let Some(image_path_str) = bmp_file.to_str() {
+                        let image_path_c_str = CString::new(image_path_str).map_err(|_| {
+                            anyhow!("Failed to convert path to C string: {}", bmp_file.display())
+                        })?;
+                        let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
+                        display_context.images.push(image);
+                    } else {
+                        return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
+                    }
+                }
+            }
+
+            display_contexts.push(display_context);
+        }
     }
 
     unsafe {
