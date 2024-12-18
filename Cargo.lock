@@ -1106,6 +1106,7 @@ dependencies = [
  "log",
  "ratatui",
  "regex",
+ "signal-hook",
  "x11",
 ]
 

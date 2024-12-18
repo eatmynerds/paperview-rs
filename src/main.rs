@@ -1,4 +1,8 @@
-use std::{ffi::CString, str::FromStr};
+use std::ffi::CString;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -9,6 +13,7 @@ use imlib_rs::{
     ImlibImageGetWidth, ImlibLoadImage, ImlibRenderImageOnDrawable,
 };
 use log::info;
+use signal_hook::{consts::signal::*, iterator::Signals};
 use x11::xlib::{
     AllTemporary, False, RetainTemporary, XClearWindow, XFlush, XKillClient, XSetCloseDownMode,
     XSetWindowBackgroundPixmap, XSync, _XDisplay,
@@ -70,12 +75,33 @@ pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: I
     ImlibFreeImageAndDecache();
 }
 
+fn setup_signal_handler(running: Arc<AtomicBool>) {
+    let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to create signal handler");
+
+    // Move the signals iterator into a separate thread
+    thread::spawn(move || {
+        for signal in signals.forever() {
+            match signal {
+                SIGINT | SIGTERM => {
+                    running.store(false, Ordering::SeqCst);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
 
     let args = CliArgs::parse();
 
     let mut display_contexts: Vec<DisplayContext> = vec![];
+
+    // Shared atomic flag for termination
+    let running = Arc::new(AtomicBool::new(true));
+    setup_signal_handler(running.clone());
 
     if args.tui {
         let mut screens = get_screens();
@@ -150,13 +176,17 @@ fn main() -> Result<()> {
     unsafe {
         let (display, monitors) = get_monitors();
 
-        for monitor in monitors {
-            info!("Starting render loop");
+        info!("Starting the program...");
+        info!("Starting render loop");
 
-            info!("Starting the program...");
+        render(
+            display,
+            monitors[0],
+            display_contexts.clone(),
+            running.clone(),
+        );
 
-            render(display, monitor, display_contexts.clone());
-        }
+        info!("Received termination signal, exiting...");
     }
 
     Ok(())

@@ -7,7 +7,12 @@ use imlib_rs::{
     ImlibImageGetWidth, ImlibLoadImage,
 };
 use log::info;
-use x11::xlib::{False, PropModeReplace, XChangeProperty, XInternAtom, _XDisplay, XA_PIXMAP};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use x11::xlib::{
+    AnyPropertyType, False, PropModeReplace, True, XChangeProperty, XGetWindowProperty,
+    XInternAtom, XKillClient, _XDisplay, XA_PIXMAP,
+};
 
 use crate::{run, DisplayContext, Monitor, MICROSECONDS_PER_SECOND};
 
@@ -64,15 +69,6 @@ unsafe fn composite_images(
     info!("Compositing bitmap images");
     ImlibContextPush(monitor.render_context);
 
-    // A loop that will iterate through all the possible frame combinations
-    // wizardable-bmp: [0.bmp 1.bmp] - 60
-    // cyberpunk-bmp: [0.bmp 1.bmp 2.bmp, 3.bmp] - 120
-    //
-    // 0.bmp + 0.bmp -> output.bmp
-    // 1.bmp + 1.bmp -> output.bmp
-    // 2.bmp + 0.bmp -> output.bmp
-    // 3.bmp + 1.bmp -> output.bmp
-    // ....
     let max_length = display_contexts
         .iter()
         .map(|context| context.images.len() as f32 / context.fps)
@@ -157,6 +153,14 @@ unsafe fn composite_images(
     output_frames
 }
 
+unsafe fn clear_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
+    let atom_root = XInternAtom(display, c"_XROOTMAP_ID".as_ptr() as *const i8, True);
+    let atom_eroot = XInternAtom(display, c"ESETROOT_PMAP_ID".as_ptr() as *const i8, True);
+    if atom_root != 0 && atom_eroot != 0 {
+        todo!();
+    }
+}
+
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
     let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
 
@@ -191,6 +195,7 @@ pub unsafe fn render(
     display: *mut _XDisplay,
     monitor: Monitor,
     display_contexts: Vec<DisplayContext>,
+    running: Arc<AtomicBool>,
 ) {
     let images = composite_images(monitor, display_contexts);
 
@@ -198,6 +203,11 @@ pub unsafe fn render(
     let mut cycle = 0;
 
     loop {
+        if !running.load(Ordering::SeqCst) {
+            clear_root_atoms(display, monitor);
+            break;
+        }
+
         let current_index = cycle % num_elements;
 
         run(display, monitor, images[current_index]);
@@ -209,4 +219,6 @@ pub unsafe fn render(
 
         std::thread::sleep(timeout);
     }
+
+    info!("Render loop terminated.");
 }
