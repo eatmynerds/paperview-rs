@@ -1,8 +1,12 @@
-use std::ffi::CString;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
+use std::{
+    ffi::CString,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 
 use anyhow::{anyhow, Result};
 use clap::Parser;

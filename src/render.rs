@@ -1,4 +1,11 @@
-use std::{ffi::CString, time::Duration};
+use std::{
+    ffi::CString,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use image::{ImageBuffer, Rgba, RgbaImage};
 use imlib_rs::{
@@ -7,8 +14,6 @@ use imlib_rs::{
     ImlibImageGetWidth, ImlibLoadImage,
 };
 use log::info;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use x11::xlib::{
     AnyPropertyType, False, PropModeReplace, True, XChangeProperty, XGetWindowProperty,
     XInternAtom, XKillClient, _XDisplay, XA_PIXMAP,
