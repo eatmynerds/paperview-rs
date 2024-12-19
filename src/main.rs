@@ -16,13 +16,12 @@ use imlib_rs::{
     ImlibCreateCroppedScaledImage, ImlibFreeImageAndDecache, ImlibImage, ImlibImageGetHeight,
     ImlibImageGetWidth, ImlibLoadImage, ImlibRenderImageOnDrawable,
 };
-use log::info;
+use log::{debug, error, info, warn};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use x11::xlib::{
     AllTemporary, False, RetainTemporary, XClearWindow, XFlush, XKillClient, XSetCloseDownMode,
     XSetWindowBackgroundPixmap, XSync, _XDisplay,
 };
-use x11::xrandr::XRRGetScreenInfo;
 
 mod models;
 use models::DisplayContext;
@@ -47,7 +46,9 @@ struct CliArgs {
     bg: Vec<String>,
 }
 
+// Add logging to the unsafe `run` function
 pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: ImlibImage) {
+    info!("Setting up rendering context for monitor...");
     ImlibContextPush(monitor.render_context);
     ImlibContextSetDither(1);
     ImlibContextSetBlend(1);
@@ -55,6 +56,10 @@ pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: I
 
     let original_width = ImlibImageGetWidth();
     let original_height = ImlibImageGetHeight();
+    debug!(
+        "Original image dimensions: {}x{}",
+        original_width, original_height
+    );
 
     let scaled_image = ImlibCreateCroppedScaledImage(
         0,
@@ -67,6 +72,7 @@ pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: I
 
     ImlibContextSetImage(scaled_image);
     ImlibRenderImageOnDrawable(0, 0);
+    info!("Image rendered on drawable");
 
     set_root_atoms(display, monitor);
 
@@ -76,22 +82,25 @@ pub unsafe fn run(display: *mut _XDisplay, monitor: Monitor, background_image: I
     XClearWindow(display, monitor.root);
     XFlush(display);
     XSync(display, False);
+    info!("X11 rendering complete");
 
     ImlibFreeImageAndDecache();
+    debug!("Image resources cleaned up");
 }
 
 fn setup_signal_handler(running: Arc<AtomicBool>) {
     let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to create signal handler");
+    info!("Signal handler setup complete");
 
-    // Move the signals iterator into a separate thread
     thread::spawn(move || {
         for signal in signals.forever() {
             match signal {
                 SIGINT | SIGTERM => {
+                    info!("Received termination signal: {:?}", signal);
                     running.store(false, Ordering::SeqCst);
                     break;
                 }
-                _ => {}
+                _ => warn!("Unhandled signal: {:?}", signal),
             }
         }
     });
@@ -99,16 +108,18 @@ fn setup_signal_handler(running: Arc<AtomicBool>) {
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    info!("Program started");
 
     let args = CliArgs::parse();
+    debug!("Parsed CLI arguments: {:?}", args);
 
     let mut display_contexts: Vec<DisplayContext> = vec![];
 
-    // Shared atomic flag for termination
     let running = Arc::new(AtomicBool::new(true));
     setup_signal_handler(running.clone());
 
     if args.tui {
+        info!("Running in TUI mode");
         let mut screens = get_screens();
 
         color_eyre::install().unwrap();
@@ -127,6 +138,7 @@ fn main() -> Result<()> {
         let app = App::new(options);
         let paths = app.run(terminal).unwrap();
         ratatui::restore();
+        debug!("TUI paths selected: {:?}", paths);
 
         for (monitor, path) in paths {
             screens[monitor].bitmap_dir = path;
@@ -135,17 +147,20 @@ fn main() -> Result<()> {
         for mut screen in screens {
             let image_dir = get_expanded_path(&screen.bitmap_dir);
             let bmp_files = sort_bitmaps(&image_dir)?;
+            debug!("Bitmap files found: {:?}", bmp_files);
 
             for bmp_file in bmp_files {
                 unsafe {
                     if let Some(image_path_str) = bmp_file.to_str() {
                         let image_path_c_str = CString::new(image_path_str).map_err(|_| {
-                            anyhow!("Failed to convert path to C string: {}", bmp_file.display())
+                            error!("Failed to convert path to C string: {}", bmp_file.display());
+                            anyhow!("Failed to convert path to C string")
                         })?;
                         let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
                         screen.images.push(image);
                     } else {
-                        return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
+                        error!("Invalid UTF-8 path: {}", bmp_file.display());
+                        return Err(anyhow!("Invalid UTF-8 path"));
                     }
                 }
             }
@@ -153,23 +168,29 @@ fn main() -> Result<()> {
             display_contexts.push(screen);
         }
     } else {
+        info!("Running in non-TUI mode with backgrounds: {:?}", args.bg);
         for background in args.bg {
-            let mut display_context = DisplayContext::from_str(&background)
-                .map_err(|e| anyhow!("Failed to parse background '{}': {}", background, e))?;
+            let mut display_context = DisplayContext::from_str(&background).map_err(|e| {
+                error!("Failed to parse background '{}': {}", background, e);
+                anyhow!("Failed to parse background")
+            })?;
 
             let image_dir = get_expanded_path(&display_context.bitmap_dir);
             let bmp_files = sort_bitmaps(&image_dir)?;
+            debug!("Bitmap files found: {:?}", bmp_files);
 
             for bmp_file in bmp_files {
                 unsafe {
                     if let Some(image_path_str) = bmp_file.to_str() {
                         let image_path_c_str = CString::new(image_path_str).map_err(|_| {
-                            anyhow!("Failed to convert path to C string: {}", bmp_file.display())
+                            error!("Failed to convert path to C string: {}", bmp_file.display());
+                            anyhow!("Failed to convert path to C string")
                         })?;
                         let image = ImlibLoadImage(image_path_c_str.as_ptr() as *const i8);
                         display_context.images.push(image);
                     } else {
-                        return Err(anyhow!("Invalid UTF-8 path: {}", bmp_file.display()).into());
+                        error!("Invalid UTF-8 path: {}", bmp_file.display());
+                        return Err(anyhow!("Invalid UTF-8 path"));
                     }
                 }
             }
@@ -180,14 +201,9 @@ fn main() -> Result<()> {
 
     unsafe {
         let (display, monitors) = get_monitors();
+        info!("Monitors detected: {:?}", monitors);
 
-        let x = XRRGetScreenInfo(display, monitors[0].root);
-
-        println!("{:#?}", x);
-
-        info!("Starting the program...");
-        info!("Starting render loop");
-
+        info!("Starting render loop...");
         render(
             display,
             monitors[0],
@@ -195,7 +211,7 @@ fn main() -> Result<()> {
             running.clone(),
         );
 
-        info!("Received termination signal, exiting...");
+        info!("Render loop terminated. Exiting...");
     }
 
     Ok(())

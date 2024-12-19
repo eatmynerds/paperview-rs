@@ -14,7 +14,7 @@ use imlib_rs::{
     ImlibFreeImageAndDecache, ImlibImage, ImlibImageGetData, ImlibImageGetHeight,
     ImlibImageGetWidth, ImlibLoadImage,
 };
-use log::info;
+use log::{debug, error, info, warn};
 use x11::xlib::{
     AllTemporary, Atom, False, Pixmap, PropModeReplace, RetainTemporary, Window, XChangeProperty,
     XClearWindow, XFlush, XFree, XGetWindowProperty, XInternAtom, XKillClient, XSetCloseDownMode,
@@ -29,6 +29,11 @@ fn combine_images(
     canvas: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     image_data: &[u32],
 ) {
+    debug!(
+        "Combining image at position {:?} with size {:?}",
+        image_position, image_size
+    );
+
     let updated_image_data = image_data
         .iter()
         .flat_map(|data| {
@@ -43,7 +48,7 @@ fn combine_images(
 
     let new_layer =
         ImageBuffer::from_raw(image_size.0 as u32, image_size.1 as u32, updated_image_data)
-            .unwrap();
+            .expect("Failed to create image buffer for new layer");
 
     let resized_layer = image::imageops::resize(
         &new_layer,
@@ -58,37 +63,43 @@ fn combine_images(
         image_position.0 as i64,
         image_position.1 as i64,
     );
+    debug!("Image successfully combined");
 }
 
 unsafe fn composite_images(
     monitor: Monitor,
     display_contexts: Vec<DisplayContext>,
 ) -> Vec<ImlibImage> {
-    info!("Creating output bitmap directory");
+    info!("Preparing to composite images");
 
-    if std::fs::exists("output-bmps").expect("Failed to check if output bitmap directory exists!") {
-        std::fs::remove_dir_all("output-bmps")
-            .expect("Failed to remove old output bitmap directory!");
+    if std::fs::exists("output-bmps").unwrap_or(false) {
+        warn!("Existing 'output-bmps' directory detected, removing...");
+        std::fs::remove_dir_all("output-bmps").expect("Failed to remove old output-bmps directory");
     }
 
-    std::fs::create_dir("output-bmps").expect("Failed to create output bitmap directory!");
+    std::fs::create_dir("output-bmps").expect("Failed to create output-bmps directory");
+    debug!("Output directory prepared");
 
-    info!("Compositing bitmap images");
     ImlibContextPush(monitor.render_context);
 
     let max_length = display_contexts
         .iter()
         .map(|context| context.images.len() as f32 / context.fps)
         .max_by(f32::total_cmp)
-        .unwrap();
+        .expect("Failed to calculate maximum animation length");
 
     let output_fps = display_contexts
         .iter()
         .map(|context| context.fps)
         .max_by(f32::total_cmp)
-        .unwrap();
+        .expect("Failed to calculate output FPS");
 
     let output_frames = (max_length * output_fps) as usize;
+
+    info!(
+        "Compositing {} frames at {} FPS, maximum animation length: {} seconds",
+        output_frames, output_fps, max_length
+    );
 
     let all_frame_combos = (0..output_frames).map(|frame| {
         display_contexts
@@ -100,14 +111,16 @@ unsafe fn composite_images(
     let mut output_frames = vec![];
 
     for (i, frame_combo) in all_frame_combos.enumerate() {
+        debug!("Processing frame {}", i);
+
         let mut canvas = RgbaImage::from_pixel(
             monitor.width as u32,
             monitor.height as u32,
             Rgba([0, 0, 0, 0]),
         );
 
-        for (i, frame) in frame_combo.iter().enumerate().rev() {
-            let current_image = display_contexts[i].images[*frame];
+        for (ctx_index, frame) in frame_combo.iter().enumerate().rev() {
+            let current_image = display_contexts[ctx_index].images[*frame];
 
             ImlibContextSetImage(current_image);
 
@@ -119,9 +132,17 @@ unsafe fn composite_images(
                 0,
                 image_width,
                 image_height,
-                display_contexts[i].width as i32,
-                display_contexts[i].height as i32,
+                display_contexts[ctx_index].width as i32,
+                display_contexts[ctx_index].height as i32,
             );
+
+            if scaled_image.is_null() {
+                error!(
+                    "Failed to scale image for frame {} in context {}",
+                    i, ctx_index
+                );
+                continue;
+            }
 
             ImlibContextSetImage(scaled_image);
 
@@ -130,37 +151,44 @@ unsafe fn composite_images(
 
             let temp_image_data = std::slice::from_raw_parts(
                 ImlibImageGetData(),
-                (display_contexts[i].width * display_contexts[i].height) as usize,
+                (display_contexts[ctx_index].width * display_contexts[ctx_index].height) as usize,
             );
 
             combine_images(
-                (display_contexts[i].x, display_contexts[i].y),
+                (display_contexts[ctx_index].x, display_contexts[ctx_index].y),
                 (updated_image_width, updated_image_height),
                 &mut canvas,
                 temp_image_data,
             );
         }
 
-        info!("Frame {} done!", i);
+        info!("Frame {} composited successfully", i);
 
+        let output_path = format!("output-bmps/output-bmp-{}.bmp", i);
         canvas
-            .save_with_format(
-                format!("output-bmps/output-bmp-{}.bmp", i),
-                image::ImageFormat::Bmp,
-            )
-            .unwrap();
+            .save_with_format(&output_path, image::ImageFormat::Bmp)
+            .expect("Failed to save BMP frame");
 
-        let image_path_c_str = CString::new(format!("output-bmps/output-bmp-{}.bmp", i)).unwrap();
+        debug!("Frame {} saved at {}", i, output_path);
 
-        output_frames.push(ImlibLoadImage(image_path_c_str.as_ptr() as *const i8));
+        let image_path_c_str = CString::new(output_path).expect("Failed to create CString");
+
+        output_frames.push(ImlibLoadImage(image_path_c_str.as_ptr()));
 
         ImlibFreeImageAndDecache();
     }
+
+    info!(
+        "Compositing complete, {} frames generated",
+        output_frames.len()
+    );
 
     output_frames
 }
 
 pub unsafe fn clear_root_atoms(display: *mut _XDisplay, monitor: Monitor, pixmap: Pixmap) {
+    info!("Clearing root atoms");
+
     let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
 
     let atom_eroot = XInternAtom(display, c"ESETROOT_PMAP_ID".as_ptr() as *const i8, False);
@@ -198,9 +226,13 @@ pub unsafe fn clear_root_atoms(display: *mut _XDisplay, monitor: Monitor, pixmap
     XClearWindow(display, monitor.root);
     XFlush(display);
     XSync(display, False);
+
+    info!("Root atoms cleared successfully");
 }
 
 pub unsafe fn get_current_pixmap(display: *mut _XDisplay, root: Window) -> Pixmap {
+    info!("Getting current pixmap");
+
     let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
 
     let mut actual_type: Atom = 0;
@@ -226,10 +258,13 @@ pub unsafe fn get_current_pixmap(display: *mut _XDisplay, root: Window) -> Pixma
 
     let pixmap_id = *(prop as *const u64);
     XFree(prop as *mut _);
+    debug!("Current pixmap ID: {}", pixmap_id);
     pixmap_id as Pixmap
 }
 
 pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
+    info!("Setting root atoms");
+
     let atom_root = XInternAtom(display, c"_XROOTPMAP_ID".as_ptr() as *const i8, False);
 
     let atom_eroot = XInternAtom(display, c"ESETROOT_PMAP_ID".as_ptr() as *const i8, False);
@@ -257,6 +292,8 @@ pub unsafe fn set_root_atoms(display: *mut _XDisplay, monitor: Monitor) {
         &monitor_pixmap as *const u64 as *const u8,
         1,
     );
+
+    info!("Root atoms set successfully");
 }
 
 pub unsafe fn render(
@@ -265,14 +302,25 @@ pub unsafe fn render(
     display_contexts: Vec<DisplayContext>,
     running: Arc<AtomicBool>,
 ) {
-    let images = composite_images(monitor, display_contexts);
+    info!("Starting render process");
+
+    let images = composite_images(monitor, display_contexts.clone());
 
     let num_elements = images.len();
     let mut cycle = 0;
     let old_background = get_current_pixmap(display, monitor.root);
 
+    let max_fps = display_contexts
+        .iter()
+        .map(|context| context.fps)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(60.0); // Default to 60 FPS if no contexts are available
+
+    let timeout_duration = Duration::from_nanos((MICROSECONDS_PER_SECOND / max_fps as u64) * 1_000);
+
     loop {
         if !running.load(Ordering::SeqCst) {
+            info!("Stopping render loop");
             clear_root_atoms(display, monitor, old_background);
             break;
         }
@@ -282,10 +330,7 @@ pub unsafe fn render(
         run(display, monitor, images[current_index]);
         cycle += 1;
 
-        let timeout = Duration::from_nanos((MICROSECONDS_PER_SECOND / 60) * 1_000);
-
-        std::thread::sleep(timeout);
+        std::thread::sleep(timeout_duration);
     }
-
-    info!("Render loop terminated.");
 }
+
