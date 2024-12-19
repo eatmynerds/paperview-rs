@@ -22,6 +22,7 @@ use x11::xlib::{
     AllTemporary, False, RetainTemporary, XClearWindow, XFlush, XKillClient, XSetCloseDownMode,
     XSetWindowBackgroundPixmap, XSync, _XDisplay,
 };
+use x11::xrandr::XRRGetScreenInfo;
 
 mod models;
 use models::DisplayContext;
@@ -179,6 +180,10 @@ fn main() -> Result<()> {
 
     unsafe {
         let (display, monitors) = get_monitors();
+
+        let x = XRRGetScreenInfo(display, monitors[0].root);
+
+        println!("{:#?}", x);
 
         info!("Starting the program...");
         info!("Starting render loop");

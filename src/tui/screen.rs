@@ -1,37 +1,32 @@
-use std::process::Command;
-
-use regex::Regex;
-
 use crate::DisplayContext;
+use regex::Regex;
+use std::process::Command;
 
 pub fn get_screens() -> Vec<DisplayContext> {
     let output = Command::new("xrandr")
         .output()
-        .expect("Failed to execute xrandr command");
+        .expect("failed to execute xrandr command");
 
     let xrandr_output = String::from_utf8_lossy(&output.stdout);
 
-    let combined_regex = Regex::new(
-    r"(?P<name>\S+)\sconnected(\sprimary)?\s(?P<resolution>(?P<width>\d+)x(?P<height>\d+)\+(?P<x>\d+)\+(?P<y>\d+)).*?\n\s+(?P<current_resolution>(?P<current_width>\d+)x(?P<current_height>\d+))\s+(?P<fps>\d+\.\d+|\d+)\*"
-).unwrap();
-
     let mut monitors: Vec<DisplayContext> = vec![];
 
-    for cap in combined_regex.captures_iter(&xrandr_output) {
-        let width: u32 = cap["width"].parse().unwrap();
-        let height: u32 = cap["height"].parse().unwrap();
-        let x: u32 = cap["x"].parse().unwrap();
-        let y: u32 = cap["y"].parse().unwrap();
+    let screen_re = Regex::new(r"(?<width>\d+)x(?<height>\d+)\+(?<x>\d+)\+(?<y>\d+)").unwrap();
+    let fps_re = Regex::new(r"(?<fps>\d+.\d+)\*").unwrap();
 
-        let fps: f32 = cap["fps"].parse().unwrap();
+    let caps = screen_re
+        .captures_iter(&xrandr_output)
+        .map(|c| c.extract())
+        .zip(fps_re.captures_iter(&xrandr_output).map(|c| c.extract()));
 
+    for ((_, [width, height, x, y]), (_, [fps])) in caps {
         monitors.push(DisplayContext {
-            width: width as i32,
-            height: height as i32,
-            x: x as i32,
-            y: y as i32,
+            width: width.parse().unwrap(),
+            height: height.parse().unwrap(),
+            x: x.parse().unwrap(),
+            y: y.parse().unwrap(),
             bitmap_dir: String::new(),
-            fps,
+            fps: fps.parse().unwrap(),
             images: vec![],
         });
     }
