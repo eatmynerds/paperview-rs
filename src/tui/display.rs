@@ -2,9 +2,10 @@ use color_eyre::Result;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
     layout::{Constraint, Layout},
+    prelude::Direction,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     DefaultTerminal, Frame,
 };
 use std::collections::{HashMap, HashSet};
@@ -110,22 +111,56 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame, input: &str) {
-        let vertical = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ]);
-        let [input_area, options_area, error_area] = vertical.areas(frame.area());
-
-        let input_title = if let Some(monitor) = self.current_monitor {
-            format!(" Enter a bitmap directory path for monitor {} ", monitor)
-        } else {
-            " Navigate using arrow keys and press Enter to select a monitor ".to_string()
+        let vertical = match self.input_mode {
+            InputMode::PathInput => {
+                if self.error_message.is_some() {
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(3), 
+                            Constraint::Min(1),   
+                            Constraint::Length(3), 
+                        ])
+                } else {
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(3), Constraint::Min(1)])
+                }
+            }
+            InputMode::Normal => {
+                if self.error_message.is_some() {
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(0),
+                            Constraint::Min(1),
+                            Constraint::Length(3),
+                        ])
+                } else {
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(0), Constraint::Min(1)])
+                }
+            }
         };
-        let input = Paragraph::new(input)
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::bordered().title(input_title));
-        frame.render_widget(input, input_area);
+
+        let areas = vertical.split(frame.area());
+
+        let input_area = areas.get(0).copied().unwrap_or_default();
+        let options_area = areas.get(1).copied().unwrap_or_default();
+        let error_area = areas.get(2).copied();
+
+        if let InputMode::PathInput = self.input_mode {
+            let input_title = if let Some(monitor) = self.current_monitor {
+                format!(" Enter a bitmap directory path for monitor {} ", monitor)
+            } else {
+                " Path Input ".to_string()
+            };
+            let input = Paragraph::new(input)
+                .style(Style::default().fg(Color::Yellow))
+                .block(Block::default().borders(Borders::ALL).title(input_title));
+            frame.render_widget(input, input_area);
+        }
 
         let options: Vec<ListItem> = self
             .options
@@ -146,14 +181,17 @@ impl App {
                 ListItem::new(Line::from(Span::styled(format!("{i}: {option}"), style)))
             })
             .collect();
-        let options = List::new(options).block(Block::bordered().title("Monitors"));
+        let options =
+            List::new(options).block(Block::default().borders(Borders::ALL).title("Monitors"));
         frame.render_widget(options, options_area);
 
         if let Some(error) = &self.error_message {
-            let error_message = Paragraph::new(error.as_str())
-                .style(Style::default().fg(Color::Red))
-                .block(Block::bordered().title("Error"));
-            frame.render_widget(error_message, error_area);
+            if let Some(error_area) = error_area {
+                let error_message = Paragraph::new(error.as_str())
+                    .style(Style::default().fg(Color::Red))
+                    .block(Block::default().borders(Borders::ALL).title("Error"));
+                frame.render_widget(error_message, error_area);
+            }
         }
     }
 }

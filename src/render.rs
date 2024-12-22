@@ -333,4 +333,3 @@ pub unsafe fn render(
         std::thread::sleep(timeout_duration);
     }
 }
-
